@@ -43,7 +43,7 @@ func DefaultConfig() Config {
 			Idletime: 60 * time.Second,
 		},
 		Client: ClientConfig{
-			URL:     "http://localhost:8080",
+			URL:     `{{.API_BASE_URL | default ":8080"}}`,
 			Timeout: 30 * time.Second,
 			Retries: 3,
 		},
