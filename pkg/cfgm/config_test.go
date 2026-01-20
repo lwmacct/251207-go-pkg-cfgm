@@ -510,7 +510,7 @@ func TestExampleYAML(t *testing.T) {
 			}{Name: "test-app", Debug: true, Port: 8080, Rate: 1.5, Retries: 3},
 			contains: []string{
 				"# 配置示例文件",
-				`name: 'test-app'`, "# 应用名称",
+				`name: "test-app"`, "# 应用名称",
 				"debug: true", "# 调试模式",
 				"port: 8080",
 				"rate: 1.5",
@@ -532,7 +532,7 @@ func TestExampleYAML(t *testing.T) {
 					Port int    `json:"port" desc:"服务器端口"`
 				}{Host: "localhost", Port: 9090},
 			},
-			contains: []string{"server:", `host: 'localhost'`, "port: 9090", "# 服务器配置"},
+			contains: []string{"server:", `host: "localhost"`, "port: 9090", "# 服务器配置"},
 		},
 		{
 			name: "duration",
@@ -1082,7 +1082,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 		yaml := string(ExampleYAML(cfg))
 
 		a := assert.New(t)
-		a.Contains(yaml, `api_key: 'sk-test-123'`)
+		a.Contains(yaml, `api_key: "sk-test-123"`)
 		// 多行注释应该被正确处理（可能换行或保持单行）
 		a.Contains(yaml, "API 密钥")
 		a.Contains(yaml, "身份验证")
@@ -1125,7 +1125,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 		yaml := string(ExampleYAML(cfg))
 
 		a := assert.New(t)
-		a.Contains(yaml, `pattern: 'test'`)
+		a.Contains(yaml, `pattern: "test"`)
 		// 注释中的 # 不应破坏 YAML 结构
 		a.Contains(yaml, "匹配模式")
 	})
@@ -1138,7 +1138,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 		yaml := string(ExampleYAML(cfg))
 
 		a := assert.New(t)
-		a.Contains(yaml, `url: 'http://localhost'`)
+		a.Contains(yaml, `url: "http://localhost"`)
 		a.Contains(yaml, "服务地址")
 	})
 
@@ -1150,7 +1150,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 		yaml := string(ExampleYAML(cfg))
 
 		a := assert.New(t)
-		a.Contains(yaml, `name: 'test'`)
+		a.Contains(yaml, `name: "test"`)
 	})
 
 	t.Run("no desc tag", func(t *testing.T) {
@@ -1161,7 +1161,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 		yaml := string(ExampleYAML(cfg))
 
 		a := assert.New(t)
-		a.Contains(yaml, `name: 'test'`)
+		a.Contains(yaml, `name: "test"`)
 		// 无 desc 标签时不应有注释
 	})
 
@@ -1181,12 +1181,12 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 		yaml := string(ExampleYAML(cfg))
 
 		a := assert.New(t)
-		a.Contains(yaml, `name: 'myapp'`)
+		a.Contains(yaml, `name: "myapp"`)
 		a.Contains(yaml, "应用名称")
 		a.Contains(yaml, "db:")
 		a.Contains(yaml, "数据库配置")
 		a.Contains(yaml, "PostgreSQL")
-		a.Contains(yaml, `host: 'localhost'`)
+		a.Contains(yaml, `host: "localhost"`)
 		a.Contains(yaml, "port: 5432")
 	})
 }

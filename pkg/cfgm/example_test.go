@@ -55,13 +55,13 @@ func Example_exampleYAML() {
 
 	// Output:
 	// # 配置示例文件, 复制此文件为 config.yaml 并根据需要修改
-	// name: 'example-app' # 应用名称
+	// name: "example-app" # 应用名称
 	// debug: false # 是否启用调试模式
 	// timeout: 30s # 超时时间
 	//
 	// # 服务器配置
 	// server:
-	//   host: 'localhost' # 服务器主机地址
+	//   host: "localhost" # 服务器主机地址
 	//   port: 8080 # 服务器端口
 }
 

@@ -154,7 +154,7 @@ func valueToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 		return &yamlv3.Node{
 			Kind:  yamlv3.ScalarNode,
 			Value: val.String(),
-			Style: yamlv3.SingleQuotedStyle,
+			Style: yamlv3.DoubleQuotedStyle,
 		}
 
 	case reflect.Bool:
