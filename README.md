@@ -15,16 +15,16 @@
 
 - [特性](#特性) `:31+10`
 - [安装](#安装) `:41+6`
-- [快速开始](#快速开始) `:47+188`
-  - [1. 定义配置结构体](#1-定义配置结构体) `:49+34`
-  - [2. 加载配置](#2-加载配置) `:83+35`
-  - [3. 环境变量](#3-环境变量) `:118+54`
-  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:172+63`
-- [模板语法](#模板语法) `:235+52`
-  - [基本语法](#基本语法) `:243+10`
-  - [内置函数](#内置函数) `:253+21`
-  - [使用示例](#使用示例) `:274+13`
-- [License](#license) `:287+3`
+- [快速开始](#快速开始) `:47+144`
+  - [1. 定义配置结构体](#1-定义配置结构体) `:49+36`
+  - [2. 加载配置](#2-加载配置) `:85+24`
+  - [3. 环境变量](#3-环境变量) `:109+19`
+  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:128+63`
+- [模板语法](#模板语法) `:191+44`
+  - [基本语法](#基本语法) `:199+16`
+  - [语义说明](#语义说明) `:215+7`
+  - [使用示例](#使用示例) `:222+13`
+- [License](#license) `:235+3`
 
 <!--TOC-->
 
@@ -33,10 +33,10 @@
 - **泛型支持**：适用于任意配置结构体
 - **多源合并**：默认值 → 配置文件 → 环境变量 → CLI flags（优先级递增）
 - **函数选项模式**：灵活配置，向后兼容
-- **环境变量支持**：前缀匹配 + 直接绑定，适合 Docker/K8s 容器化部署
-- **自动映射**：CLI flag 名称自动从 `koanf` tag 推导（snake_case → kebab-case）
+- **环境变量支持**：前缀匹配，适合 Docker/K8s 容器化部署
+- **自动映射**：CLI flag 名称自动从 `json` tag 推导（仅将 `.` 转为 `-`）
 - **示例生成**：自动根据结构体生成带注释的 YAML 配置示例
-- **模板展开**：支持环境变量引用、默认值和多级 fallback
+- **模板展开**：支持环境变量引用、默认值与多级 fallback（Shell 参数展开）
 
 ## 安装
 
@@ -50,7 +50,7 @@ go get github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm
 
 ```go
 // internal/config/config.go
-package cfgm
+package config
 
 import (
     "time"
@@ -58,12 +58,12 @@ import (
 )
 
 type Config struct {
-    Server ServerConfig `koanf:"server" desc:"服务端配置"`
+    Server ServerConfig `json:"server" desc:"服务端配置"`
 }
 
 type ServerConfig struct {
-    Addr    string        `koanf:"addr" desc:"监听地址"`
-    Timeout time.Duration `koanf:"timeout" desc:"超时时间"`
+    Addr    string        `json:"addr" desc:"监听地址"`
+    Timeout time.Duration `json:"timeout" desc:"超时时间"`
 }
 
 func DefaultConfig() Config {
@@ -80,6 +80,8 @@ func Load(opts ...cfgm.Option) (*Config, error) {
 }
 ```
 
+说明：YAML/JSON 都以 `json` tag 作为配置 key。
+
 ### 2. 加载配置
 
 ```go
@@ -88,7 +90,7 @@ cfg, err := cfgm.Load(DefaultConfig())
 
 // 使用应用专属配置文件路径 (.myapp.yaml, ~/.myapp.yaml, /etc/myapp/config.yaml 等)
 cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithConfigPaths(cfgm.DefaultPaths("myapp")...),
+    cfgm.WithAppName("myapp"),
 )
 
 // 使用环境变量（前缀 MYAPP_）
@@ -96,21 +98,10 @@ cfg, err := cfgm.Load(DefaultConfig(),
     cfgm.WithEnvPrefix("MYAPP_"),
 )
 
-// 绑定第三方工具环境变量（如 REDIS_URL）
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithEnvBindings(map[string]string{
-        "REDIS_URL":         "redis.url",
-        "ETCDCTL_ENDPOINTS": "etcd.endpoints",
-    }),
-)
-
 // 完整示例：配置文件 + 环境变量 + CLI flags
 cfg, err := cfgm.Load(DefaultConfig(),
     cfgm.WithConfigPaths("config.yaml", "/etc/myapp/config.yaml"),
     cfgm.WithEnvPrefix("MYAPP_"),
-    cfgm.WithEnvBindings(map[string]string{
-        "REDIS_URL": "redis.url",
-    }),
     cfgm.WithCommand(cmd),
 )
 ```
@@ -119,7 +110,7 @@ cfg, err := cfgm.Load(DefaultConfig(),
 
 #### 前缀匹配（WithEnvPrefix）
 
-| 环境变量                     | koanf key              |
+| 环境变量                     | 配置 key               |
 | ---------------------------- | ---------------------- |
 | `MYAPP_SERVER_ADDR`          | `server.addr`          |
 | `MYAPP_SERVER_TIMEOUT`       | `server.timeout`       |
@@ -129,45 +120,10 @@ cfg, err := cfgm.Load(DefaultConfig(),
 转换规则：
 
 1. 移除前缀（如 `MYAPP_`）
-2. 转为小写
-3. 点号 `.` 和连字符 `-` 都转为下划线 `_`
+2. 点号 `.` 与连字符 `-` 转为下划线 `_`
+3. 转为大写
 
-**注意**：通过反射自动生成所有 koanf key 的绑定，因此支持任意命名的 koanf key（包括包含连字符的 key）。
-
-#### 直接绑定（WithEnvBindings）
-
-复用第三方工具的标准环境变量：
-
-```go
-cfgm.WithEnvBindings(map[string]string{
-    "REDIS_URL":         "redis.url",
-    "ETCDCTL_ENDPOINTS": "etcd.endpoints",
-    "MYSQL_PWD":         "database.password",
-})
-```
-
-#### 配置文件绑定（WithEnvBindKey）
-
-在配置文件中定义绑定关系，无需修改代码：
-
-```yaml
-# config.yaml
-envbind:
-  REDIS_URL: redis.url
-  ETCDCTL_ENDPOINTS: etcd.endpoints
-
-redis:
-  url: "redis://localhost:6379"
-```
-
-```go
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithConfigPaths("config.yaml"),
-    cfgm.WithEnvBindKey("envbind"),  // 从配置文件读取绑定
-)
-```
-
-**绑定优先级**：代码中的 `WithEnvBindings` > 配置文件中的 `envbind` 节点。
+**注意**：通过反射自动生成配置 key 绑定，只匹配结构体中声明的 key（包括包含连字符的 key）。
 
 ### 4. 测试驱动的配置管理
 
@@ -214,7 +170,7 @@ server:
   timeout: 30s # 超时时间
 ```
 
-**工作原理**：通过反射读取结构体的 `koanf` 和 `desc` tag，自动生成完整的 YAML 示例。
+**工作原理**：通过反射读取结构体的 `json` 和 `desc` tag，自动生成完整的 YAML 示例。
 
 #### 校验配置文件（TestConfigKeysValid）
 
@@ -234,53 +190,45 @@ go test -v -run TestConfigKeysValid ./internal/config/...
 
 ## 模板语法
 
-本库提供 `tmpl` 包用于模板展开，支持环境变量引用和多级 fallback 机制。
+本库提供 `templexp` 包用于模板展开，采用 Shell 参数展开语法。
 
 ```bash
-go get github.com/lwmacct/251207-go-pkg-cfgm/pkg/tmpl
+go get github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp
 ```
 
 ### 基本语法
 
-| 语法                        | 说明             | 示例                                      |
-| --------------------------- | ---------------- | ----------------------------------------- |
-| `{{.VAR}}`                  | 直接访问环境变量 | `{{.HOME}}`                               |
-| `{{env "VAR"}}`             | env 函数方式     | `{{env "API_KEY"}}`                       |
-| `{{env "VAR" "default"}}`   | 带默认值         | `{{env "PORT" "8080"}}`                   |
-| `{{.VAR \| default "val"}}` | pipeline 默认值  | `{{.HOST \| default "localhost"}}`        |
-| `{{coalesce .A .B "val"}}`  | 多级 fallback    | `{{coalesce .PRIMARY .BACKUP "default"}}` |
+| 语法              | 说明                     | 示例                 |
+| ----------------- | ------------------------ | -------------------- |
+| `${VAR}`          | 参数展开                 | `${HOME}`            |
+| `${VAR:-default}` | fallback（未设置或空）   | `${PORT:-8080}`      |
+| `${VAR-default}`  | fallback（仅未设置）     | `${PORT-8080}`       |
+| `${VAR:+alt}`     | 替代值（已设置且非空）   | `${DEBUG:+1}`        |
+| `${VAR+alt}`      | 替代值（已设置即可）     | `${FLAG+1}`          |
+| `${VAR:?msg}`     | 必填（未设置或空时报错） | `${TOKEN:?required}` |
+| `${VAR?msg}`      | 必填（未设置时报错）     | `${TOKEN?required}`  |
+| `${VAR:=default}` | 赋值（未设置或空时赋值） | `${REGION:=cn}`      |
+| `${VAR=default}`  | 赋值（未设置时赋值）     | `${REGION=cn}`       |
 
-### 内置函数
+支持使用 `$$` 输出字面 `$`。
 
-#### env
+### 语义说明
 
-获取环境变量，支持可选默认值：
-
-- `{{env "VAR"}}` - 不存在返回空字符串
-- `{{env "VAR" "default"}}` - 不存在返回默认值
-
-#### default
-
-pipeline 友好的默认值函数：
-
-- `{{.VAR | default "fallback"}}` - 值为空时返回 fallback
-
-#### coalesce
-
-返回第一个非空值：
-
-- `{{coalesce .VAR1 .VAR2 .VAR3 "default"}}` - 按优先级返回
+- 仅识别 `${...}`，不解析 `$VAR` 形式
+- 支持嵌套展开：`${A:-${B:-default}}`
+- `:=` / `=` 赋值仅作用于当前展开过程，不会写回进程环境
+- 无法识别的 `${...}` 会原样保留
 
 ### 使用示例
 
 ```go
-import "github.com/lwmacct/251207-go-pkg-cfgm/pkg/tmpl"
+import "github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
 
 // 展开模板
-result, err := tmpl.ExpandTemplate(`{
-  "host": "{{.DB_HOST | default "localhost"}}",
-  "port": "{{env "DB_PORT" "5432"}}",
-  "key": "{{coalesce .PRIMARY_KEY .BACKUP_KEY "sk-default"}}"
+result, err := templexp.ExpandTemplate(`{
+  "host": "${DB_HOST:-localhost}",
+  "port": "${DB_PORT:-5432}",
+  "key": "${PRIMARY_KEY:-${BACKUP_KEY:-sk-default}}"
 }`)
 ```
 

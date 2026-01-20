@@ -9,26 +9,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knadh/koanf/parsers/json"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/knadh/koanf/providers/structs"
-	"github.com/knadh/koanf/v2"
 	"github.com/urfave/cli/v3"
 
-	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/tmpl"
+	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
 )
 
-// DefaultPaths 返回默认配置文件搜索路径。
+// DefaultPaths 返回默认配置文件的搜索顺序。
 //
-// appName 可选，若提供则包含应用专属配置路径。
+// appName 可选，提供后会追加应用专属路径。
+// 返回顺序即查找顺序，先命中的文件生效。
 //
-// 搜索优先级 (从高到低)：
-//  1. ./.appname.yaml - 当前目录应用配置 (项目级别)
+// 优先级 (从高到低)：
+//  1. ./.appname.yaml - 当前目录应用配置
 //  2. ~/.appname.yaml - 用户主目录配置
-//  3. /etc/appname/config.yaml - 系统级别配置
+//  3. /etc/appname/config.yaml - 系统级配置
 //  4. config.yaml - 当前目录通用配置
-//  5. config/config.yaml - 子目录配置
+//  5. config/config.yaml - 子目录通用配置
 func DefaultPaths(appName ...string) []string {
 	var paths []string
 
@@ -50,29 +46,22 @@ func DefaultPaths(appName ...string) []string {
 	return paths
 }
 
-// Load 加载配置，按优先级合并。
+// Load 读取配置并按优先级合并。
 //
 // 优先级 (从低到高)：
-//  1. 默认值 - 通过 defaultConfig 参数传入
-//  2. 配置文件 - 通过 [WithConfigPaths] 或 [WithAppName] 设置
-//  3. 环境变量(前缀) - 通过 [WithEnvPrefix] 自动生成绑定
-//  4. 环境变量(配置文件绑定) - 通过 [WithEnvBindKey] 从配置文件读取
-//  5. 环境变量(代码绑定) - 通过 [WithEnvBindings] 在代码中显式指定
-//  6. CLI flags - 通过 [WithCommand] 选项设置，最高优先级
+//  1. 默认值 - defaultConfig
+//  2. 配置文件 - [WithConfigPaths] / [WithAppName]
+//  3. 环境变量(前缀) - [WithEnvPrefix]
+//  4. CLI flags - [WithCommand]
 //
-// 泛型参数 T 为配置结构体类型，必须使用 koanf tag 标记字段。
+// 配置 key 由 json tag 定义，YAML 与 JSON 共享同一套 key。
+// 配置文件按顺序查找，命中首个文件即停止。
 func Load[T any](defaultConfig T, opts ...Option) (*T, error) {
 	return load(defaultConfig, 1, opts...)
 }
 
-// load 是内部加载函数，callerSkip 指定 FindProjectRoot 的调用栈跳过层数。
-// 不同的入口函数根据自身调用深度传递正确的 skip 值：
-//   - Load: skip=1 (Load → load → FindProjectRoot)
-//   - LoadCmd: skip=1 (LoadCmd → load → FindProjectRoot)
-//   - MustLoad: skip=2 (MustLoad → load → FindProjectRoot)
-//   - MustLoadCmd: skip=2 (MustLoadCmd → load → FindProjectRoot)
-//
-
+// load 是内部加载实现，callerSkip 用于控制 FindProjectRoot 的跳过层数。
+// 各入口函数会根据自身调用深度传入合适的 skip 值。
 func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 	// 解析选项
 	options := &options{}
@@ -102,12 +91,7 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 		}
 	}
 
-	k := koanf.New(".")
-
-	// 1️⃣ 加载默认配置 (最低优先级)
-	if err := k.Load(structs.Provider(defaultConfig, "koanf"), nil); err != nil {
-		return nil, fmt.Errorf("failed to load default config: %w", err)
-	}
+	configMap := structToMap(defaultConfig)
 
 	// 2️⃣ 加载配置文件 (按顺序搜索，找到第一个即停止)
 	configLoaded := false
@@ -131,17 +115,18 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 
 		// 默认启用模板展开，在解析前处理模板
 		if !options.noTemplateExpansion {
-			expanded, err := tmpl.ExpandTemplate(string(content))
-			if err != nil {
-				return nil, fmt.Errorf("expand template in %s: %w", path, err)
+			expanded, expandErr := templexp.ExpandTemplate(string(content))
+			if expandErr != nil {
+				return nil, fmt.Errorf("expand template in %s: %w", path, expandErr)
 			}
 			content = []byte(expanded)
 		}
 
-		// 使用 rawbytes 加载处理后的内容
-		if err := k.Load(rawbytes.Provider(content), parserForPath(path)); err != nil {
+		fileMap, err := parseConfigBytes(path, content)
+		if err != nil {
 			return nil, fmt.Errorf("parse config file %s: %w", path, err)
 		}
+		mergeMaps(configMap, fileMap)
 
 		slog.Debug("Loaded config from file", "path", path, "templateExpansion", !options.noTemplateExpansion)
 		configLoaded = true
@@ -153,61 +138,36 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 		slog.Debug("No config file found, using defaults")
 	}
 
-	// 2.5️⃣ 从配置文件读取环境变量绑定 (在加载配置文件后)
-	if options.envBindKey != "" {
-		options.envBindings = mergeEnvBindingsFromConfig(k, options.envBindKey, options.envBindings)
-	}
-
-	// 3️⃣ 自动生成环境变量绑定 (基于配置结构体的 koanf key)
-	// 这解决了 koanf key 包含连字符（如 rev-auth-user）时无法通过前缀匹配的问题
+	// 3️⃣ 自动生成环境变量绑定 (基于配置结构体的 key)
+	// 支持包含连字符的 key，例如 rev-auth-user
 	if options.envPrefix != "" {
-		// 构建已绑定配置路径的集合（用户显式绑定优先）
-		boundPaths := make(map[string]bool)
-		for _, configPath := range options.envBindings {
-			boundPaths[configPath] = true
-		}
-
-		autoBindings := generateEnvBindings(options.envPrefix, collectKoanfKeys(defaultConfig))
-		// 合并自动绑定（仅当配置路径未被绑定时）
+		autoBindings := generateEnvBindings(options.envPrefix, collectConfigKeys(defaultConfig))
+		slog.Debug("Generated auto env bindings", "prefix", options.envPrefix, "count", len(autoBindings))
 		for envKey, configPath := range autoBindings {
-			if !boundPaths[configPath] {
-				if options.envBindings == nil {
-					options.envBindings = make(map[string]string)
-				}
-				options.envBindings[envKey] = configPath
-				boundPaths[configPath] = true
+			if val := os.Getenv(envKey); val != "" {
+				setByPath(configMap, configPath, val)
+				slog.Debug("Loaded env binding", "env", envKey, "path", configPath)
 			}
 		}
-		slog.Debug("Generated auto env bindings", "prefix", options.envPrefix, "count", len(autoBindings))
 	}
 
-	// 4️⃣ 加载环境变量绑定 (高于配置文件，低于 CLI flags)
-	for envKey, configPath := range options.envBindings {
-		if val := os.Getenv(envKey); val != "" {
-			_ = k.Set(configPath, val)
-			slog.Debug("Loaded env binding", "env", envKey, "path", configPath)
-		}
-	}
-
-	// 5️⃣ 加载 CLI flags (最高优先级，仅当用户明确指定时)
+	// 4️⃣ 加载 CLI flags (最高优先级，仅当用户明确指定时)
 	if options.cmd != nil {
-		applyCLIFlagsGeneric(options.cmd, k, defaultConfig)
+		applyCLIFlagsGeneric(options.cmd, configMap, defaultConfig)
 	}
 
 	// 解析到结构体
 	var cfg T
-	if err := k.Unmarshal("", &cfg); err != nil {
+	if err := decodeConfigMap(configMap, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
 	return &cfg, nil
 }
 
-// LoadCmd 是 [Load] 的便捷版本，将 CLI 命令和应用名称作为参数。
+// LoadCmd 是 [Load] 的便捷版本，适用于 CLI 场景。
 //
-// 这是最常用的配置加载方式，适合大多数 CLI 应用场景。
-// appName 用于生成默认配置文件搜索路径（见 [DefaultPaths]）。
-// 如果 appName 为空字符串，将只搜索通用配置路径。
+// 它会注入 [WithCommand]，appName 非空时额外注入 [WithAppName]。
 //
 // 等价于：
 //
@@ -234,10 +194,7 @@ func LoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...O
 	return load(defaultConfig, 1, append(baseOpts, opts...)...)
 }
 
-// MustLoad 是 [Load] 的 panic 版本。
-//
-// 如果配置加载失败，会调用 panic 终止程序。
-// 适用于程序启动阶段，配置加载失败意味着程序无法继续。
+// MustLoad 调用 [Load] 并在失败时 panic，适合启动阶段。
 //
 // 示例：
 //
@@ -254,10 +211,7 @@ func MustLoad[T any](defaultConfig T, opts ...Option) *T {
 	return cfg
 }
 
-// MustLoadCmd 是 [LoadCmd] 的 panic 版本。
-//
-// 如果配置加载失败，会调用 panic 终止程序。
-// 适用于程序启动阶段，配置加载失败意味着程序无法继续。
+// MustLoadCmd 调用 [LoadCmd] 并在失败时 panic，适合启动阶段。
 //
 // 示例：
 //
@@ -277,19 +231,18 @@ func MustLoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts 
 	return cfg
 }
 
-// collectKoanfKeys 通过反射收集配置结构体的所有 koanf key。
+// collectConfigKeys 递归收集配置结构体的 key 列表。
 //
-// 递归遍历结构体字段，返回所有叶子节点的完整 koanf key。
-// 例如对于 client.rev-auth-user 这样的嵌套结构，会返回完整路径。
-func collectKoanfKeys[T any](defaultConfig T) []string {
+// 以 json tag 为准，返回叶子路径（如 client.rev-auth-user）。
+func collectConfigKeys[T any](defaultConfig T) []string {
 	var keys []string
-	collectKoanfKeysRecursive(reflect.TypeOf(defaultConfig), "", &keys)
+	collectConfigKeysRecursive(reflect.TypeOf(defaultConfig), "", &keys)
 
 	return keys
 }
 
-// collectKoanfKeysRecursive 递归收集 koanf key。
-func collectKoanfKeysRecursive(typ reflect.Type, prefix string, keys *[]string) {
+// collectConfigKeysRecursive 递归遍历字段并拼接完整 key 路径。
+func collectConfigKeysRecursive(typ reflect.Type, prefix string, keys *[]string) {
 	// 处理指针类型
 	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
@@ -302,21 +255,19 @@ func collectKoanfKeysRecursive(typ reflect.Type, prefix string, keys *[]string) 
 	for i := range typ.NumField() {
 		field := typ.Field(i)
 
-		koanfKey := field.Tag.Get("koanf")
-		if koanfKey == "" {
+		key := configTagName(field)
+		if key == "" {
 			continue
 		}
 
-		fullKey := koanfKey
+		fullKey := key
 		if prefix != "" {
-			fullKey = prefix + "." + koanfKey
+			fullKey = prefix + "." + key
 		}
 
 		// 如果是嵌套结构体（非特殊类型），递归处理
-		if field.Type.Kind() == reflect.Struct &&
-			field.Type != reflect.TypeFor[time.Duration]() &&
-			field.Type != reflect.TypeFor[time.Time]() {
-			collectKoanfKeysRecursive(field.Type, fullKey, keys)
+		if isStructType(field.Type) {
+			collectConfigKeysRecursive(field.Type, fullKey, keys)
 
 			continue
 		}
@@ -325,54 +276,19 @@ func collectKoanfKeysRecursive(typ reflect.Type, prefix string, keys *[]string) 
 	}
 }
 
-// mergeEnvBindingsFromConfig 从配置文件读取环境变量绑定并合并到现有绑定中。
-// 代码中的绑定优先，配置文件中的绑定仅用于填充未绑定的配置路径。
-func mergeEnvBindingsFromConfig(k *koanf.Koanf, bindKey string, existing map[string]string) map[string]string {
-	bindings := k.StringMap(bindKey)
-	if len(bindings) == 0 {
-		return existing
-	}
-
-	// 构建已绑定配置路径的集合（代码中的绑定优先）
-	boundPaths := make(map[string]bool)
-	for _, configPath := range existing {
-		boundPaths[configPath] = true
-	}
-
-	// 确保结果 map 已初始化
-	result := existing
-	if result == nil {
-		result = make(map[string]string)
-	}
-
-	// 合并配置文件绑定（仅当配置路径未被绑定时）
-	for envKey, configPath := range bindings {
-		if !boundPaths[configPath] {
-			result[envKey] = configPath
-			boundPaths[configPath] = true
-		}
-	}
-
-	// 删除绑定节点，不污染用户配置
-	k.Delete(bindKey)
-	slog.Debug("Loaded env bindings from config", "key", bindKey, "count", len(bindings))
-
-	return result
-}
-
-// generateEnvBindings 根据 koanf key 生成环境变量绑定。
+// generateEnvBindings 根据配置 key 生成环境变量映射。
 //
 // 转换规则：
-//   - koanf key 中的 "." 和 "-" 都转为 "_"
+//   - key 中的 "." 和 "-" 转为 "_"
 //   - 转为大写
 //   - 添加前缀
 //
 // 示例 (前缀 "APP_")：
 //   - client.rev-auth-user → APP_CLIENT_REV_AUTH_USER
 //   - server.idle-timeout → APP_SERVER_IDLE_TIMEOUT
-func generateEnvBindings(prefix string, koanfKeys []string) map[string]string {
-	bindings := make(map[string]string, len(koanfKeys))
-	for _, key := range koanfKeys {
+func generateEnvBindings(prefix string, keys []string) map[string]string {
+	bindings := make(map[string]string, len(keys))
+	for _, key := range keys {
 		// 将 "." 和 "-" 都转为 "_"，然后大写
 		envKey := strings.ToUpper(strings.NewReplacer(".", "_", "-", "_").Replace(key))
 		bindings[prefix+envKey] = key
@@ -381,30 +297,13 @@ func generateEnvBindings(prefix string, koanfKeys []string) map[string]string {
 	return bindings
 }
 
-// parserForPath 根据文件扩展名返回对应的解析器。
+// applyCLIFlagsGeneric 将用户显式设置的 CLI flags 写入配置 map。
 //
-// 支持的格式：
-//   - .json → JSON 解析器
-//   - .yaml, .yml, 其他 → YAML 解析器 (默认)
-func parserForPath(path string) koanf.Parser {
-	if strings.ToLower(filepath.Ext(path)) == ".json" {
-		return json.Parser()
-	}
-
-	return yaml.Parser()
-}
-
-// applyCLIFlagsGeneric 通过反射将用户明确指定的 CLI flags 应用到 koanf 实例。
+// 根据 json tag 生成 CLI flag 名称，仅替换 "." 为 "-"。
 //
-// 自动根据配置结构体的 koanf 标签映射 CLI flag 名称。
-//
-// 支持两种 CLI flag 格式 (优先使用 kebab-case)：
-//   - kebab-case: --server-skip_verify (仅 . 转为 -)
-//   - dot notation: --server.skip_verify (保持原样)
-//
-// 映射示例 (koanf tag → CLI flags)：
-//   - server.url → --server-url 或 --server.url
-//   - tls.skip_verify → --tls-skip_verify 或 --tls.skip_verify
+// 映射示例 (json tag → CLI flags)：
+//   - server.url → --server-url
+//   - tls.skip_verify → --tls-skip_verify
 //
 // 支持的类型：
 //   - 基本类型: string, bool
@@ -414,81 +313,61 @@ func parserForPath(path string) koanf.Parser {
 //   - 时间类型: time.Duration, time.Time
 //   - 切片类型: []string, []int, []int64, []float64 等
 //   - Map 类型: map[string]string
-func applyCLIFlagsGeneric[T any](cmd *cli.Command, k *koanf.Koanf, defaultConfig T) {
-	applyCLIFlagsRecursive(cmd, k, reflect.TypeOf(defaultConfig), "")
+func applyCLIFlagsGeneric[T any](cmd *cli.Command, config map[string]any, defaultConfig T) {
+	applyCLIFlagsRecursive(cmd, config, reflect.TypeOf(defaultConfig), "")
 }
 
-// applyCLIFlagsRecursive 递归遍历结构体字段应用 CLI flags。
-func applyCLIFlagsRecursive(cmd *cli.Command, k *koanf.Koanf, typ reflect.Type, prefix string) {
+// applyCLIFlagsRecursive 递归遍历结构体字段并应用 CLI flags。
+func applyCLIFlagsRecursive(cmd *cli.Command, config map[string]any, typ reflect.Type, prefix string) {
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	if typ.Kind() != reflect.Struct {
+		return
+	}
+
 	for i := range typ.NumField() {
 		field := typ.Field(i)
 
-		// 获取 koanf 标签作为配置 key
-		koanfKey := field.Tag.Get("koanf")
-		if koanfKey == "" {
+		// 获取 json 标签作为配置 key
+		key := configTagName(field)
+		if key == "" {
 			continue
 		}
 
-		// 构建完整的 koanf key
-		fullKoanfKey := koanfKey
+		// 构建完整的配置 key
+		fullKey := key
 		if prefix != "" {
-			fullKoanfKey = prefix + "." + koanfKey
+			fullKey = prefix + "." + key
 		}
 
 		// 如果是嵌套结构体，递归处理
-		if field.Type.Kind() == reflect.Struct &&
-			field.Type != reflect.TypeFor[time.Duration]() &&
-			field.Type != reflect.TypeFor[time.Time]() {
-			applyCLIFlagsRecursive(cmd, k, field.Type, fullKoanfKey)
+		if isStructType(field.Type) {
+			applyCLIFlagsRecursive(cmd, config, field.Type, fullKey)
 
 			continue
 		}
 
-		// 检测用户设置的 flag 格式 (kebab-case 或 dot notation)
-		cliFlag, isSet := detectCLIFlag(cmd, fullKoanfKey)
-		if !isSet {
+		cliFlag := strings.ReplaceAll(fullKey, ".", "-")
+		if !cmd.IsSet(cliFlag) {
 			continue
 		}
 
 		// 根据字段类型获取值并设置
-		setCLIFlagValue(cmd, k, fullKoanfKey, cliFlag, field.Type)
+		setCLIFlagValue(cmd, config, fullKey, cliFlag, field.Type)
 	}
 }
 
-// detectCLIFlag 检测用户设置的 CLI flag 格式。
-//
-// 支持两种格式：kebab-case (server-skip_verify) 和 dot notation (server.skip_verify)。
-// 返回实际设置的 flag 名称和是否被设置。
-func detectCLIFlag(cmd *cli.Command, koanfKey string) (string, bool) {
-	// 生成 kebab-case 格式: server.skip_verify -> server-skip_verify
-	kebabFlag := strings.ReplaceAll(koanfKey, ".", "-")
-
-	// dot notation 格式即为原始 koanf key: server.skip_verify
-	dotFlag := koanfKey
-
-	// 优先检查 kebab-case 格式
-	if cmd.IsSet(kebabFlag) {
-		return kebabFlag, true
-	}
-
-	// 再检查 dot notation 格式
-	if cmd.IsSet(dotFlag) {
-		return dotFlag, true
-	}
-
-	return "", false
-}
-
-// setCLIFlagValue 根据字段类型从 CLI 获取值并设置到 koanf。
-func setCLIFlagValue(cmd *cli.Command, k *koanf.Koanf, koanfKey, cliFlag string, fieldType reflect.Type) {
+// setCLIFlagValue 按字段类型读取 CLI 值并写入配置 map。
+func setCLIFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFlag string, fieldType reflect.Type) {
 	// 先检查特殊类型 (time.Duration, time.Time)
 	switch fieldType {
 	case reflect.TypeFor[time.Duration]():
-		_ = k.Set(koanfKey, cmd.Duration(cliFlag))
+		setByPath(config, configPath, cmd.Duration(cliFlag))
 
 		return
 	case reflect.TypeFor[time.Time]():
-		_ = k.Set(koanfKey, cmd.Timestamp(cliFlag))
+		setByPath(config, configPath, cmd.Timestamp(cliFlag))
 
 		return
 	}
@@ -497,50 +376,50 @@ func setCLIFlagValue(cmd *cli.Command, k *koanf.Koanf, koanfKey, cliFlag string,
 	switch fieldType.Kind() {
 	// 字符串
 	case reflect.String:
-		_ = k.Set(koanfKey, cmd.String(cliFlag))
+		setByPath(config, configPath, cmd.String(cliFlag))
 
 	// 布尔
 	case reflect.Bool:
-		_ = k.Set(koanfKey, cmd.Bool(cliFlag))
+		setByPath(config, configPath, cmd.Bool(cliFlag))
 
 	// 有符号整数
 	case reflect.Int:
-		_ = k.Set(koanfKey, cmd.Int(cliFlag))
+		setByPath(config, configPath, cmd.Int(cliFlag))
 	case reflect.Int8:
-		_ = k.Set(koanfKey, cmd.Int8(cliFlag))
+		setByPath(config, configPath, cmd.Int8(cliFlag))
 	case reflect.Int16:
-		_ = k.Set(koanfKey, cmd.Int16(cliFlag))
+		setByPath(config, configPath, cmd.Int16(cliFlag))
 	case reflect.Int32:
-		_ = k.Set(koanfKey, cmd.Int32(cliFlag))
+		setByPath(config, configPath, cmd.Int32(cliFlag))
 	case reflect.Int64:
-		_ = k.Set(koanfKey, cmd.Int64(cliFlag))
+		setByPath(config, configPath, cmd.Int64(cliFlag))
 
 	// 无符号整数
 	case reflect.Uint:
-		_ = k.Set(koanfKey, cmd.Uint(cliFlag))
+		setByPath(config, configPath, cmd.Uint(cliFlag))
 	case reflect.Uint8:
-		_ = k.Set(koanfKey, uint8(cmd.Uint(cliFlag))) //nolint:gosec // CLI value expected to be in uint8 range
+		setByPath(config, configPath, uint8(cmd.Uint(cliFlag))) //nolint:gosec // CLI value expected to be in uint8 range
 	case reflect.Uint16:
-		_ = k.Set(koanfKey, cmd.Uint16(cliFlag))
+		setByPath(config, configPath, cmd.Uint16(cliFlag))
 	case reflect.Uint32:
-		_ = k.Set(koanfKey, cmd.Uint32(cliFlag))
+		setByPath(config, configPath, cmd.Uint32(cliFlag))
 	case reflect.Uint64:
-		_ = k.Set(koanfKey, cmd.Uint64(cliFlag))
+		setByPath(config, configPath, cmd.Uint64(cliFlag))
 
 	// 浮点数
 	case reflect.Float32:
-		_ = k.Set(koanfKey, cmd.Float32(cliFlag))
+		setByPath(config, configPath, cmd.Float32(cliFlag))
 	case reflect.Float64:
-		_ = k.Set(koanfKey, cmd.Float64(cliFlag))
+		setByPath(config, configPath, cmd.Float64(cliFlag))
 
 	// 切片类型
 	case reflect.Slice:
-		setSliceFlagValue(cmd, k, koanfKey, cliFlag, fieldType)
+		setSliceFlagValue(cmd, config, configPath, cliFlag, fieldType)
 
 	// Map 类型
 	case reflect.Map:
 		if fieldType.Key().Kind() == reflect.String && fieldType.Elem().Kind() == reflect.String {
-			_ = k.Set(koanfKey, cmd.StringMap(cliFlag))
+			setByPath(config, configPath, cmd.StringMap(cliFlag))
 		}
 
 	default:
@@ -548,38 +427,38 @@ func setCLIFlagValue(cmd *cli.Command, k *koanf.Koanf, koanfKey, cliFlag string,
 	}
 }
 
-// setSliceFlagValue 处理切片类型的 CLI flag。
-func setSliceFlagValue(cmd *cli.Command, k *koanf.Koanf, koanfKey, cliFlag string, fieldType reflect.Type) {
+// setSliceFlagValue 处理切片类型的 CLI flag 值。
+func setSliceFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFlag string, fieldType reflect.Type) {
 	elemType := fieldType.Elem()
 
 	// 先检查特殊元素类型
 	if elemType == reflect.TypeFor[time.Time]() {
-		_ = k.Set(koanfKey, cmd.TimestampArgs(cliFlag))
+		setByPath(config, configPath, cmd.TimestampArgs(cliFlag))
 
 		return
 	}
 
 	switch elemType.Kind() {
 	case reflect.String:
-		_ = k.Set(koanfKey, cmd.StringSlice(cliFlag))
+		setByPath(config, configPath, cmd.StringSlice(cliFlag))
 	case reflect.Int:
-		_ = k.Set(koanfKey, cmd.IntSlice(cliFlag))
+		setByPath(config, configPath, cmd.IntSlice(cliFlag))
 	case reflect.Int8:
-		_ = k.Set(koanfKey, cmd.Int8Slice(cliFlag))
+		setByPath(config, configPath, cmd.Int8Slice(cliFlag))
 	case reflect.Int16:
-		_ = k.Set(koanfKey, cmd.Int16Slice(cliFlag))
+		setByPath(config, configPath, cmd.Int16Slice(cliFlag))
 	case reflect.Int32:
-		_ = k.Set(koanfKey, cmd.Int32Slice(cliFlag))
+		setByPath(config, configPath, cmd.Int32Slice(cliFlag))
 	case reflect.Int64:
-		_ = k.Set(koanfKey, cmd.Int64Slice(cliFlag))
+		setByPath(config, configPath, cmd.Int64Slice(cliFlag))
 	case reflect.Uint16:
-		_ = k.Set(koanfKey, cmd.Uint16Slice(cliFlag))
+		setByPath(config, configPath, cmd.Uint16Slice(cliFlag))
 	case reflect.Uint32:
-		_ = k.Set(koanfKey, cmd.Uint32Slice(cliFlag))
+		setByPath(config, configPath, cmd.Uint32Slice(cliFlag))
 	case reflect.Float32:
-		_ = k.Set(koanfKey, cmd.Float32Slice(cliFlag))
+		setByPath(config, configPath, cmd.Float32Slice(cliFlag))
 	case reflect.Float64:
-		_ = k.Set(koanfKey, cmd.Float64Slice(cliFlag))
+		setByPath(config, configPath, cmd.Float64Slice(cliFlag))
 
 	default:
 		// 不支持的切片元素类型，忽略

@@ -62,13 +62,13 @@ func getAction(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-// HTTPClient HTTP 客户端封装
+// HTTPClient 封装客户端配置与 HTTP 实例。
 type HTTPClient struct {
 	config *config.ClientConfig
 	client *http.Client
 }
 
-// NewHTTPClient 创建新的 HTTP 客户端
+// NewHTTPClient 构造 HTTPClient，并设置超时。
 func NewHTTPClient(cfg *config.ClientConfig) *HTTPClient {
 	return &HTTPClient{
 		config: cfg,
@@ -78,12 +78,12 @@ func NewHTTPClient(cfg *config.ClientConfig) *HTTPClient {
 	}
 }
 
-// HealthResponse 健康检查响应
+// HealthResponse 表示健康检查响应。
 type HealthResponse struct {
 	Status string `json:"status"`
 }
 
-// Health 执行健康检查
+// Health 执行健康检查请求并解析返回值。
 func (c *HTTPClient) Health(ctx context.Context) (*HealthResponse, error) {
 	url := strings.TrimSuffix(c.config.URL, "/") + "/health"
 
@@ -106,7 +106,7 @@ func (c *HTTPClient) Health(ctx context.Context) (*HealthResponse, error) {
 	return nil, fmt.Errorf("health check failed after %d retries: %w", c.config.Retries, lastErr)
 }
 
-// Get 发送 GET 请求
+// Get 发送 GET 请求并返回响应体。
 func (c *HTTPClient) Get(ctx context.Context, path string) (string, error) {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
@@ -128,7 +128,7 @@ func (c *HTTPClient) Get(ctx context.Context, path string) (string, error) {
 	return "", fmt.Errorf("GET request failed after %d retries: %w", c.config.Retries, lastErr)
 }
 
-// doRequest 执行 HTTP 请求
+// doRequest 执行 HTTP 请求并返回响应体。
 func (c *HTTPClient) doRequest(ctx context.Context, method, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {

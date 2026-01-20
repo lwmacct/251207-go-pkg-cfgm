@@ -3,5 +3,5 @@ package command
 
 import "github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
 
-// Defaults 默认配置 - 单一来源 (Single Source of Truth)
+// Defaults 为默认配置的单一来源。
 var Defaults = config.DefaultConfig()

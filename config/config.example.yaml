@@ -9,6 +9,6 @@ server:
 
 # 客户端配置
 client:
-  url: '{{.API_BASE_URL | default ":8080"}}' # 服务器地址
+  url: "${API_BASE_URL:-:8080}" # 服务器地址
   timeout: 30s # 请求超时时间
   retries: 3 # 重试次数

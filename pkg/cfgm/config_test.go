@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knadh/koanf/providers/confmap"
-	"github.com/knadh/koanf/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -18,7 +16,7 @@ import (
 // 测试辅助函数
 // =============================================================================
 
-// writeTempConfig 创建临时配置文件，返回文件路径和清理函数
+// writeTempConfig 创建临时配置文件并返回路径（清理由 t.Cleanup 处理）。
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	tmpFile, err := os.CreateTemp(t.TempDir(), "config_test_*.yaml")
@@ -31,7 +29,7 @@ func writeTempConfig(t *testing.T, content string) string {
 	return tmpFile.Name()
 }
 
-// runCLITest 运行 CLI 测试，返回加载的配置
+// runCLITest 运行 CLI 命令并返回加载的配置。
 func runCLITest[T any](t *testing.T, defaultCfg T, flags []cli.Flag, args []string, opts ...Option) *T {
 	t.Helper()
 	var loadedCfg *T
@@ -63,11 +61,11 @@ func runCLITest[T any](t *testing.T, defaultCfg T, flags []cli.Flag, args []stri
 
 func TestLoadWithEnvPrefix(t *testing.T) {
 	type ServerConfig struct {
-		URL string `koanf:"url"`
+		URL string `json:"url"`
 	}
 	type Config struct {
-		Debug  bool         `koanf:"debug"`
-		Server ServerConfig `koanf:"server"`
+		Debug  bool         `json:"debug"`
+		Server ServerConfig `json:"server"`
 	}
 
 	t.Setenv("TEST_DEBUG", "true")
@@ -80,111 +78,16 @@ func TestLoadWithEnvPrefix(t *testing.T) {
 	assert.Equal(t, "http://test:8080", cfg.Server.URL)
 }
 
-func TestLoadWithEnvBinding(t *testing.T) {
-	type RedisConfig struct {
-		URL string `koanf:"url"`
-	}
-	type Config struct {
-		Name  string      `koanf:"name"`
-		Redis RedisConfig `koanf:"redis"`
-	}
-
-	t.Setenv("REDIS_URL", "redis://test:6379")
-
-	cfg, err := Load(
-		Config{Name: "default", Redis: RedisConfig{URL: "redis://default:6379"}},
-		WithEnvBinding("REDIS_URL", "redis.url"),
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "redis://test:6379", cfg.Redis.URL)
-}
-
-func TestLoadWithHyphenInKoanfKey(t *testing.T) {
-	type ClientConfig struct {
-		ServerPassword string `koanf:"server-password"`
-		ServerHost     string `koanf:"server-host"`
-	}
-	type Config struct {
-		Client ClientConfig `koanf:"client"`
-	}
-
-	t.Setenv("CLIENT_SERVER_PASSWORD", "secret123")
-	t.Setenv("MY_SERVER_HOST", "test-host")
-
-	cfg, err := Load(
-		Config{Client: ClientConfig{ServerPassword: "default-password", ServerHost: "default-host"}},
-		WithEnvBinding("CLIENT_SERVER_PASSWORD", "client.server-password"),
-		WithEnvBinding("MY_SERVER_HOST", "client.server-host"),
-	)
-	require.NoError(t, err)
-
-	assert.Equal(t, "secret123", cfg.Client.ServerPassword)
-	assert.Equal(t, "test-host", cfg.Client.ServerHost)
-}
-
-func TestLoadWithEnvBindKey(t *testing.T) {
-	type ClientConfig struct {
-		ServerPassword string `koanf:"server-password"`
-	}
-	type Config struct {
-		Name   string       `koanf:"name"`
-		Client ClientConfig `koanf:"client"`
-	}
-
-	tmpFile := writeTempConfig(t, `
-envbind:
-  CLIENT_PWD: client.server-password
-name: "from-config"
-client:
-  server-password: "file-password"
-`)
-
-	t.Setenv("CLIENT_PWD", "env-password")
-
-	cfg, err := Load(
-		Config{Name: "default", Client: ClientConfig{ServerPassword: "default-password"}},
-		WithConfigPaths(tmpFile),
-		WithEnvBindKey("envbind"),
-	)
-	require.NoError(t, err)
-
-	assert.Equal(t, "env-password", cfg.Client.ServerPassword, "env should override config file")
-	assert.Equal(t, "from-config", cfg.Name)
-}
-
-func TestEnvBindingPriority(t *testing.T) {
-	type Config struct {
-		Password string `koanf:"password"`
-	}
-
-	tmpFile := writeTempConfig(t, `
-envbind:
-  FILE_PWD: password
-password: "file-value"
-`)
-
-	t.Setenv("FILE_PWD", "from-file-binding")
-	t.Setenv("CODE_PWD", "from-code-binding")
-
-	cfg, err := Load(
-		Config{Password: "default"},
-		WithConfigPaths(tmpFile),
-		WithEnvBindKey("envbind"),
-		WithEnvBinding("CODE_PWD", "password"), // 代码绑定优先级更高
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "from-code-binding", cfg.Password)
-}
-
 func TestAutoEnvBinding(t *testing.T) {
+	//nolint:tagliatelle
 	type ClientConfig struct {
-		ServerPassword string `koanf:"server-password"`
-		ServerHost     string `koanf:"server-host"`
-		Timeout        int    `koanf:"timeout"`
+		ServerPassword string `json:"server-password"`
+		ServerHost     string `json:"server-host"`
+		Timeout        int    `json:"timeout"`
 	}
 	type Config struct {
-		Name   string       `koanf:"name"`
-		Client ClientConfig `koanf:"client"`
+		Name   string       `json:"name"`
+		Client ClientConfig `json:"client"`
 	}
 
 	t.Setenv("TEST_NAME", "from-env")
@@ -207,9 +110,9 @@ func TestAutoEnvBinding(t *testing.T) {
 
 func TestLoadPriority(t *testing.T) {
 	type Config struct {
-		Value1 string `koanf:"value1"`
-		Value2 string `koanf:"value2"`
-		Value3 string `koanf:"value3"`
+		Value1 string `json:"value1"`
+		Value2 string `json:"value2"`
+		Value3 string `json:"value3"`
 	}
 
 	tmpFile := writeTempConfig(t, `
@@ -220,27 +123,25 @@ value3: "from-file"
 
 	t.Setenv("TEST_VALUE2", "from-env-prefix")
 	t.Setenv("TEST_VALUE3", "from-env-prefix")
-	t.Setenv("BOUND_VALUE3", "from-env-binding")
 
 	cfg, err := Load(
 		Config{Value1: "default", Value2: "default", Value3: "default"},
 		WithConfigPaths(tmpFile),
 		WithEnvPrefix("TEST_"),
-		WithEnvBinding("BOUND_VALUE3", "value3"),
 	)
 	require.NoError(t, err)
 
 	a := assert.New(t)
 	a.Equal("from-file", cfg.Value1, "config file > default")
 	a.Equal("from-env-prefix", cfg.Value2, "env prefix > config file")
-	a.Equal("from-env-binding", cfg.Value3, "env binding > env prefix")
+	a.Equal("from-env-prefix", cfg.Value3, "env prefix > config file")
 }
 
 func TestLoadWithDefaultsOnly(t *testing.T) {
 	type Config struct {
-		Name  string `koanf:"name"`
-		Debug bool   `koanf:"debug"`
-		Port  int    `koanf:"port"`
+		Name  string `json:"name"`
+		Debug bool   `json:"debug"`
+		Port  int    `json:"port"`
 	}
 
 	cfg, err := Load(Config{Name: "my-app", Debug: true, Port: 8080})
@@ -254,7 +155,7 @@ func TestLoadWithDefaultsOnly(t *testing.T) {
 
 func TestLoadWithNonExistentConfigFile(t *testing.T) {
 	type Config struct {
-		Name string `koanf:"name"`
+		Name string `json:"name"`
 	}
 
 	cfg, err := Load(Config{Name: "fallback-app"}, WithConfigPaths("/nonexistent/path/config.yaml"))
@@ -262,18 +163,18 @@ func TestLoadWithNonExistentConfigFile(t *testing.T) {
 	assert.Equal(t, "fallback-app", cfg.Name)
 }
 
-// TestLoadWithConfigFileOnly 测试纯配置文件读取 (cmd=nil, 无环境变量)
-// 验证当只使用配置文件时，Load 函数能正确解析并覆盖默认值
+// TestLoadWithConfigFileOnly 测试纯配置文件读取 (cmd=nil, 无环境变量)。
+// 验证只使用配置文件时，Load 能正确解析并覆盖默认值。
 func TestLoadWithConfigFileOnly(t *testing.T) {
 	type ServerConfig struct {
-		Host    string        `koanf:"host"`
-		Port    int           `koanf:"port"`
-		Timeout time.Duration `koanf:"timeout"`
+		Host    string        `json:"host"`
+		Port    int           `json:"port"`
+		Timeout time.Duration `json:"timeout"`
 	}
 	type Config struct {
-		Name   string       `koanf:"name"`
-		Debug  bool         `koanf:"debug"`
-		Server ServerConfig `koanf:"server"`
+		Name   string       `json:"name"`
+		Debug  bool         `json:"debug"`
+		Server ServerConfig `json:"server"`
 	}
 
 	tmpFile := writeTempConfig(t, `
@@ -285,7 +186,7 @@ server:
   timeout: 60s
 `)
 
-	// cmd=nil, 只有配置文件，没有 WithCommand/WithEnvPrefix/WithEnvBinding
+	// cmd=nil, 只有配置文件，没有 WithCommand/WithEnvPrefix
 	cfg, err := Load(
 		Config{
 			Name:  "default-app",
@@ -308,14 +209,14 @@ server:
 	a.Equal(60*time.Second, cfg.Server.Timeout, "duration should be parsed correctly")
 }
 
-// TestLoadWithConfigFilePartialOverride 测试配置文件部分覆盖
-// 验证配置文件只覆盖指定字段，未指定字段保持默认值
+// TestLoadWithConfigFilePartialOverride 测试配置文件部分覆盖。
+// 验证配置文件只覆盖指定字段，未指定字段保持默认值。
 func TestLoadWithConfigFilePartialOverride(t *testing.T) {
 	type Config struct {
-		Name    string `koanf:"name"`
-		Debug   bool   `koanf:"debug"`
-		Port    int    `koanf:"port"`
-		Timeout int    `koanf:"timeout"`
+		Name    string `json:"name"`
+		Debug   bool   `json:"debug"`
+		Port    int    `json:"port"`
+		Timeout int    `json:"timeout"`
 	}
 
 	tmpFile := writeTempConfig(t, `
@@ -336,13 +237,13 @@ port: 9000
 	a.Equal(30, cfg.Timeout, "unspecified field should keep default (int)")
 }
 
-// TestLoadWithBaseDir 测试路径基准目录功能
+// TestLoadWithBaseDir 测试路径基准目录功能。
 func TestLoadWithBaseDir(t *testing.T) {
 	type ServerConfig struct {
-		Addr string `koanf:"addr"`
+		Addr string `json:"addr"`
 	}
 	type Config struct {
-		Server ServerConfig `koanf:"server"`
+		Server ServerConfig `json:"server"`
 	}
 
 	t.Run("default uses project root", func(t *testing.T) {
@@ -377,13 +278,13 @@ func TestLoadWithBaseDir(t *testing.T) {
 	})
 }
 
-// TestLoadWithCallerSkip 测试自定义调用栈跳过层数
+// TestLoadWithCallerSkip 测试自定义调用栈跳过层数。
 func TestLoadWithCallerSkip(t *testing.T) {
 	type ServerConfig struct {
-		Addr string `koanf:"addr"`
+		Addr string `json:"addr"`
 	}
 	type Config struct {
-		Server ServerConfig `koanf:"server"`
+		Server ServerConfig `json:"server"`
 	}
 
 	// 封装函数模拟深层调用栈
@@ -426,13 +327,13 @@ func TestLoadWithCallerSkip(t *testing.T) {
 
 func TestLoadWithCommand(t *testing.T) {
 	type ServerConfig struct {
-		Addr    string        `koanf:"addr"`
-		Timeout time.Duration `koanf:"timeout"`
+		Addr    string        `json:"addr"`
+		Timeout time.Duration `json:"timeout"`
 	}
 	type Config struct {
-		Name   string       `koanf:"name"`
-		Debug  bool         `koanf:"debug"`
-		Server ServerConfig `koanf:"server"`
+		Name   string       `json:"name"`
+		Debug  bool         `json:"debug"`
+		Server ServerConfig `json:"server"`
 	}
 
 	defaultCfg := Config{Name: "default-app", Debug: false, Server: ServerConfig{Addr: ":8080", Timeout: 30 * time.Second}}
@@ -454,11 +355,11 @@ func TestLoadWithCommand(t *testing.T) {
 
 func TestLoadWithCommand_NestedFlags(t *testing.T) {
 	type ServerConfig struct {
-		Addr    string        `koanf:"addr"`
-		Timeout time.Duration `koanf:"timeout"`
+		Addr    string        `json:"addr"`
+		Timeout time.Duration `json:"timeout"`
 	}
 	type Config struct {
-		Server ServerConfig `koanf:"server"`
+		Server ServerConfig `json:"server"`
 	}
 
 	defaultCfg := Config{Server: ServerConfig{Addr: ":8080", Timeout: 30 * time.Second}}
@@ -475,8 +376,8 @@ func TestLoadWithCommand_NestedFlags(t *testing.T) {
 
 func TestLoadWithCommand_SubCommands(t *testing.T) {
 	type Config struct {
-		URL     string `koanf:"url"`
-		Timeout int    `koanf:"timeout"`
+		URL     string `json:"url"`
+		Timeout int    `json:"timeout"`
 	}
 
 	defaultCfg := Config{URL: "http://localhost:8080", Timeout: 30}
@@ -516,7 +417,7 @@ func TestLoadWithCommand_SubCommands(t *testing.T) {
 
 func TestLoadWithCommand_Priority(t *testing.T) {
 	type Config struct {
-		Value string `koanf:"value"`
+		Value string `json:"value"`
 	}
 
 	t.Setenv("TEST_VALUE", "from-env")
@@ -531,8 +432,8 @@ func TestLoadWithCommand_Priority(t *testing.T) {
 
 func TestLoadWithCommand_OnlySetFlags(t *testing.T) {
 	type Config struct {
-		Name  string `koanf:"name"`
-		Debug bool   `koanf:"debug"`
+		Name  string `json:"name"`
+		Debug bool   `json:"debug"`
 	}
 
 	tmpFile := writeTempConfig(t, `
@@ -554,9 +455,9 @@ debug: true
 
 func TestLoadWithCommand_NumericTypes(t *testing.T) {
 	type Config struct {
-		Port    int     `koanf:"port"`
-		Rate    float64 `koanf:"rate"`
-		Retries uint    `koanf:"retries"`
+		Port    int     `json:"port"`
+		Rate    float64 `json:"rate"`
+		Retries uint    `json:"retries"`
 	}
 
 	defaultCfg := Config{Port: 8080, Rate: 1.0, Retries: 3}
@@ -576,7 +477,7 @@ func TestLoadWithCommand_NumericTypes(t *testing.T) {
 
 func TestLoadWithCommand_StringSlice(t *testing.T) {
 	type Config struct {
-		Hosts []string `koanf:"hosts"`
+		Hosts []string `json:"hosts"`
 	}
 
 	defaultCfg := Config{Hosts: []string{"localhost"}}
@@ -601,11 +502,11 @@ func TestExampleYAML(t *testing.T) {
 		{
 			name: "basic types",
 			cfg: struct {
-				Name    string  `koanf:"name" desc:"应用名称"`
-				Debug   bool    `koanf:"debug" desc:"调试模式"`
-				Port    int     `koanf:"port" desc:"端口号"`
-				Rate    float64 `koanf:"rate" desc:"速率"`
-				Retries uint    `koanf:"retries" desc:"重试次数"`
+				Name    string  `json:"name" desc:"应用名称"`
+				Debug   bool    `json:"debug" desc:"调试模式"`
+				Port    int     `json:"port" desc:"端口号"`
+				Rate    float64 `json:"rate" desc:"速率"`
+				Retries uint    `json:"retries" desc:"重试次数"`
 			}{Name: "test-app", Debug: true, Port: 8080, Rate: 1.5, Retries: 3},
 			contains: []string{
 				"# 配置示例文件",
@@ -619,16 +520,16 @@ func TestExampleYAML(t *testing.T) {
 		{
 			name: "nested struct",
 			cfg: struct {
-				Name   string `koanf:"name" desc:"应用名称"`
+				Name   string `json:"name" desc:"应用名称"`
 				Server struct {
-					Host string `koanf:"host" desc:"服务器地址"`
-					Port int    `koanf:"port" desc:"服务器端口"`
-				} `koanf:"server" desc:"服务器配置"`
+					Host string `json:"host" desc:"服务器地址"`
+					Port int    `json:"port" desc:"服务器端口"`
+				} `json:"server" desc:"服务器配置"`
 			}{
 				Name: "nested-app",
 				Server: struct {
-					Host string `koanf:"host" desc:"服务器地址"`
-					Port int    `koanf:"port" desc:"服务器端口"`
+					Host string `json:"host" desc:"服务器地址"`
+					Port int    `json:"port" desc:"服务器端口"`
 				}{Host: "localhost", Port: 9090},
 			},
 			contains: []string{"server:", `host: 'localhost'`, "port: 9090", "# 服务器配置"},
@@ -636,31 +537,31 @@ func TestExampleYAML(t *testing.T) {
 		{
 			name: "duration",
 			cfg: struct {
-				Timeout time.Duration `koanf:"timeout" desc:"超时时间"`
+				Timeout time.Duration `json:"timeout" desc:"超时时间"`
 			}{Timeout: 30 * time.Second},
 			contains: []string{"timeout: 30s", "# 超时时间"},
 		},
 		{
 			name: "slice",
 			cfg: struct {
-				Hosts []string `koanf:"hosts" desc:"主机列表"`
-				Empty []string `koanf:"empty" desc:"空列表"`
+				Hosts []string `json:"hosts" desc:"主机列表"`
+				Empty []string `json:"empty" desc:"空列表"`
 			}{Hosts: []string{"host1", "host2"}, Empty: []string{}},
 			contains: []string{"hosts:", "- host1", "- host2", "empty: []"},
 		},
 		{
 			name: "map",
 			cfg: struct {
-				Labels map[string]string `koanf:"labels" desc:"标签"`
-				Empty  map[string]string `koanf:"empty" desc:"空映射"`
+				Labels map[string]string `json:"labels" desc:"标签"`
+				Empty  map[string]string `json:"empty" desc:"空映射"`
 			}{Labels: map[string]string{"env": "prod"}, Empty: map[string]string{}},
 			contains: []string{"labels:", "empty: {}"},
 		},
 		{
 			name: "skip untagged",
 			cfg: struct {
-				Name     string `koanf:"name" desc:"应用名称"`
-				Internal string // 无 koanf 标签
+				Name     string `json:"name" desc:"应用名称"`
+				Internal string // 无 json 标签
 			}{Name: "test", Internal: "should-not-appear"},
 			contains: []string{"name:"},
 			excludes: []string{"should-not-appear", "Internal"},
@@ -738,10 +639,10 @@ func TestFindProjectRoot(t *testing.T) {
 }
 
 // =============================================================================
-// collectKoanfKeys 测试 (内部函数)
+// collectConfigKeys 测试 (内部函数)
 // =============================================================================
 
-func TestCollectKoanfKeys(t *testing.T) {
+func TestCollectConfigKeys(t *testing.T) {
 	tests := []struct {
 		name     string
 		cfg      any
@@ -750,38 +651,39 @@ func TestCollectKoanfKeys(t *testing.T) {
 		{
 			name: "flat",
 			cfg: struct {
-				Name  string `koanf:"name"`
-				Debug bool   `koanf:"debug"`
-				Port  int    `koanf:"port"`
+				Name  string `json:"name"`
+				Debug bool   `json:"debug"`
+				Port  int    `json:"port"`
 			}{},
 			expected: []string{"name", "debug", "port"},
 		},
 		{
 			name: "nested",
 			cfg: struct {
-				Name   string `koanf:"name"`
+				Name   string `json:"name"`
 				Server struct {
-					Host string `koanf:"host"`
-					Port int    `koanf:"port"`
-				} `koanf:"server"`
+					Host string `json:"host"`
+					Port int    `json:"port"`
+				} `json:"server"`
 			}{},
 			expected: []string{"name", "server.host", "server.port"},
 		},
 		{
 			name: "hyphenated keys",
+			//nolint:tagliatelle
 			cfg: struct {
 				Client struct {
-					ServerPassword string `koanf:"server-password"`
-					RevAuthUser    string `koanf:"rev-auth-user"`
-				} `koanf:"client"`
+					ServerPassword string `json:"server-password"`
+					RevAuthUser    string `json:"rev-auth-user"`
+				} `json:"client"`
 			}{},
 			expected: []string{"client.server-password", "client.rev-auth-user"},
 		},
 		{
 			name: "duration not recursed",
 			cfg: struct {
-				Timeout  time.Duration `koanf:"timeout"`
-				Interval time.Duration `koanf:"interval"`
+				Timeout  time.Duration `json:"timeout"`
+				Interval time.Duration `json:"interval"`
 			}{},
 			expected: []string{"timeout", "interval"},
 		},
@@ -789,7 +691,7 @@ func TestCollectKoanfKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			keys := collectKoanfKeys(tt.cfg)
+			keys := collectConfigKeys(tt.cfg)
 			a := assert.New(t)
 			a.Len(keys, len(tt.expected))
 			for _, k := range tt.expected {
@@ -863,17 +765,18 @@ func TestGenerateEnvBindings(t *testing.T) {
 // =============================================================================
 
 func TestTemplateExpansion(t *testing.T) {
+	//nolint:tagliatelle
 	type Config struct {
-		APIKey  string `koanf:"api_key"`
-		Model   string `koanf:"model"`
-		BaseURL string `koanf:"base_url"`
+		APIKey  string `json:"api_key"`
+		Model   string `json:"model"`
+		BaseURL string `json:"base_url"`
 	}
 
-	t.Run("env function", func(t *testing.T) {
+	t.Run("shell expansion", func(t *testing.T) {
 		t.Setenv("TEST_API_KEY", "sk-test-12345")
 
 		configContent := `
-api_key: '{{env "TEST_API_KEY"}}'
+api_key: '${TEST_API_KEY}'
 model: "gpt-4"
 base_url: "https://api.openai.com"
 `
@@ -885,9 +788,9 @@ base_url: "https://api.openai.com"
 		assert.Equal(t, "gpt-4", cfg.Model)
 	})
 
-	t.Run("env with default value", func(t *testing.T) {
+	t.Run("fallback with default value", func(t *testing.T) {
 		configContent := `
-api_key: '{{env "NONEXISTENT_KEY" "default-key"}}'
+api_key: '${NONEXISTENT_KEY:-default-key}'
 model: "gpt-3.5-turbo"
 `
 		configPath := writeTempConfig(t, configContent)
@@ -897,9 +800,9 @@ model: "gpt-3.5-turbo"
 		assert.Equal(t, "default-key", cfg.APIKey)
 	})
 
-	t.Run("default function pipeline", func(t *testing.T) {
+	t.Run("fallback with empty value", func(t *testing.T) {
 		configContent := `
-api_key: '{{env "NONEXISTENT_KEY" | default "fallback-key"}}'
+api_key: '${NONEXISTENT_KEY:-fallback-key}'
 model: "claude-3"
 `
 		configPath := writeTempConfig(t, configContent)
@@ -909,14 +812,14 @@ model: "claude-3"
 		assert.Equal(t, "fallback-key", cfg.APIKey)
 	})
 
-	t.Run("taskfile style direct access", func(t *testing.T) {
+	t.Run("shell direct access", func(t *testing.T) {
 		t.Setenv("MY_MODEL", "claude-haiku")
 		t.Setenv("MY_BASE_URL", "https://api.anthropic.com")
 
 		configContent := `
 api_key: "test-key"
-model: '{{.MY_MODEL}}'
-base_url: '{{.MY_BASE_URL | default "https://default.com"}}'
+model: '${MY_MODEL}'
+base_url: '${MY_BASE_URL:-https://default.com}'
 `
 		configPath := writeTempConfig(t, configContent)
 		cfg, err := Load(Config{}, WithConfigPaths(configPath))
@@ -926,11 +829,11 @@ base_url: '{{.MY_BASE_URL | default "https://default.com"}}'
 		assert.Equal(t, "https://api.anthropic.com", cfg.BaseURL)
 	})
 
-	t.Run("coalesce function", func(t *testing.T) {
+	t.Run("nested fallback", func(t *testing.T) {
 		t.Setenv("SECONDARY_KEY", "secondary-value")
 
 		configContent := `
-api_key: '{{coalesce .PRIMARY_KEY .SECONDARY_KEY "final-default"}}'
+api_key: '${PRIMARY_KEY:-${SECONDARY_KEY:-final-default}}'
 model: "test"
 `
 		configPath := writeTempConfig(t, configContent)
@@ -940,9 +843,9 @@ model: "test"
 		assert.Equal(t, "secondary-value", cfg.APIKey)
 	})
 
-	t.Run("coalesce all empty returns default", func(t *testing.T) {
+	t.Run("nested fallback all empty returns default", func(t *testing.T) {
 		configContent := `
-api_key: '{{coalesce .MISSING1 .MISSING2 "final-default"}}'
+api_key: '${MISSING1:-${MISSING2:-final-default}}'
 model: "test"
 `
 		configPath := writeTempConfig(t, configContent)
@@ -954,7 +857,7 @@ model: "test"
 
 	t.Run("WithoutTemplateExpansion disables expansion", func(t *testing.T) {
 		configContent := `
-api_key: '{{env "TEST_KEY"}}'
+api_key: '${TEST_KEY}'
 model: "test"
 `
 		configPath := writeTempConfig(t, configContent)
@@ -962,16 +865,16 @@ model: "test"
 		require.NoError(t, err)
 
 		// 未展开，保持原样
-		assert.Equal(t, "{{env \"TEST_KEY\"}}", cfg.APIKey)
+		assert.Equal(t, "${TEST_KEY}", cfg.APIKey)
 	})
 
-	t.Run("template syntax error", func(t *testing.T) {
+	t.Run("required var error", func(t *testing.T) {
 		configContent := `
-api_key: '{{env "TEST_KEY"'
+api_key: '${TEST_KEY:?missing}'
 model: "test"
 `
 		configPath := writeTempConfig(t, configContent)
-		_, err := Load(Config{}, WithConfigPaths(configPath)) // 默认启用，语法错误会报错
+		_, err := Load(Config{}, WithConfigPaths(configPath)) // 默认启用，必填变量缺失会报错
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expand template")
 	})
@@ -981,9 +884,9 @@ model: "test"
 		t.Setenv("LLM_MODEL", "anthropic/claude-haiku-4.5")
 
 		configContent := `
-api_key: '{{coalesce .OPENROUTER_API_KEY .ANTHROPIC_API_KEY "sk-default"}}'
-model: '{{.LLM_MODEL | default "gpt-4"}}'
-base_url: '{{env "LLM_BASE_URL" "https://openrouter.ai/api/v1"}}'
+api_key: '${OPENROUTER_API_KEY:-${ANTHROPIC_API_KEY:-sk-default}}'
+model: '${LLM_MODEL:-gpt-4}'
+base_url: '${LLM_BASE_URL:-https://openrouter.ai/api/v1}'
 `
 		configPath := writeTempConfig(t, configContent)
 		cfg, err := Load(Config{}, WithConfigPaths(configPath))
@@ -999,7 +902,7 @@ base_url: '{{env "LLM_BASE_URL" "https://openrouter.ai/api/v1"}}'
 // JSON 格式支持测试
 // =============================================================================
 
-// writeTempJSONConfig 创建临时 JSON 配置文件
+// writeTempJSONConfig 创建临时 JSON 配置文件。
 func writeTempJSONConfig(t *testing.T, content string) string {
 	t.Helper()
 	tmpFile, err := os.CreateTemp(t.TempDir(), "config_test_*.json")
@@ -1014,14 +917,14 @@ func writeTempJSONConfig(t *testing.T, content string) string {
 
 func TestLoadWithJSONConfig(t *testing.T) {
 	type ServerConfig struct {
-		Host    string        `koanf:"host"`
-		Port    int           `koanf:"port"`
-		Timeout time.Duration `koanf:"timeout"`
+		Host    string        `json:"host"`
+		Port    int           `json:"port"`
+		Timeout time.Duration `json:"timeout"`
 	}
 	type Config struct {
-		Name   string       `koanf:"name"`
-		Debug  bool         `koanf:"debug"`
-		Server ServerConfig `koanf:"server"`
+		Name   string       `json:"name"`
+		Debug  bool         `json:"debug"`
+		Server ServerConfig `json:"server"`
 	}
 
 	jsonContent := `{
@@ -1050,7 +953,7 @@ func TestLoadWithJSONConfig(t *testing.T) {
 	a.Equal(60*time.Second, cfg.Server.Timeout)
 }
 
-func TestParserForPath(t *testing.T) {
+func TestIsJSONPath(t *testing.T) {
 	tests := []struct {
 		name   string
 		path   string
@@ -1069,34 +972,22 @@ func TestParserForPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parser := parserForPath(tt.path)
-			// 通过解析简单内容来验证 parser 类型
-			if tt.isJSON {
-				// JSON parser 应该能解析 JSON
-				result, err := parser.Unmarshal([]byte(`{"key": "value"}`))
-				require.NoError(t, err)
-				assert.Equal(t, "value", result["key"])
-			} else {
-				// YAML parser 应该能解析 YAML
-				result, err := parser.Unmarshal([]byte("key: value"))
-				require.NoError(t, err)
-				assert.Equal(t, "value", result["key"])
-			}
+			assert.Equal(t, tt.isJSON, isJSONPath(tt.path))
 		})
 	}
 }
 
 func TestJSONTemplateExpansion(t *testing.T) {
+	//nolint:tagliatelle
 	type Config struct {
-		APIKey string `koanf:"api_key"`
-		Model  string `koanf:"model"`
+		APIKey string `json:"api_key"`
+		Model  string `json:"model"`
 	}
 
-	t.Run("env function in JSON", func(t *testing.T) {
+	t.Run("shell expansion in JSON", func(t *testing.T) {
 		t.Setenv("JSON_TEST_KEY", "sk-json-12345")
 
-		// 使用反引号包裹模板参数，避免 JSON 转义引号与模板语法冲突
-		jsonContent := "{\"api_key\": \"{{env `JSON_TEST_KEY`}}\", \"model\": \"gpt-4\"}"
+		jsonContent := "{\"api_key\": \"${JSON_TEST_KEY}\", \"model\": \"gpt-4\"}"
 		tmpFile := writeTempJSONConfig(t, jsonContent)
 		cfg, err := Load(Config{}, WithConfigPaths(tmpFile))
 		require.NoError(t, err)
@@ -1106,8 +997,7 @@ func TestJSONTemplateExpansion(t *testing.T) {
 	})
 
 	t.Run("default value in JSON", func(t *testing.T) {
-		// 使用反引号包裹模板参数
-		jsonContent := "{\"api_key\": \"{{env `NONEXISTENT` `default-json-key`}}\", \"model\": \"claude-3\"}"
+		jsonContent := "{\"api_key\": \"${NONEXISTENT:-default-json-key}\", \"model\": \"claude-3\"}"
 		tmpFile := writeTempJSONConfig(t, jsonContent)
 		cfg, err := Load(Config{}, WithConfigPaths(tmpFile))
 		require.NoError(t, err)
@@ -1116,21 +1006,21 @@ func TestJSONTemplateExpansion(t *testing.T) {
 	})
 
 	t.Run("disable template in JSON", func(t *testing.T) {
-		jsonContent := "{\"api_key\": \"{{env `TEST`}}\", \"model\": \"test\"}"
+		jsonContent := "{\"api_key\": \"${TEST}\", \"model\": \"test\"}"
 		tmpFile := writeTempJSONConfig(t, jsonContent)
 		cfg, err := Load(Config{}, WithConfigPaths(tmpFile), WithoutTemplateExpansion())
 		require.NoError(t, err)
 
-		assert.Equal(t, "{{env `TEST`}}", cfg.APIKey)
+		assert.Equal(t, "${TEST}", cfg.APIKey)
 	})
 }
 
 func TestJSONPartialOverride(t *testing.T) {
 	type Config struct {
-		Name    string `koanf:"name"`
-		Debug   bool   `koanf:"debug"`
-		Port    int    `koanf:"port"`
-		Timeout int    `koanf:"timeout"`
+		Name    string `json:"name"`
+		Debug   bool   `json:"debug"`
+		Port    int    `json:"port"`
+		Timeout int    `json:"timeout"`
 	}
 
 	jsonContent := `{
@@ -1154,8 +1044,8 @@ func TestJSONPartialOverride(t *testing.T) {
 
 func TestJSONWithEnvPrefix(t *testing.T) {
 	type Config struct {
-		Name  string `koanf:"name"`
-		Debug bool   `koanf:"debug"`
+		Name  string `json:"name"`
+		Debug bool   `json:"debug"`
 	}
 
 	jsonContent := `{
@@ -1184,8 +1074,9 @@ func TestJSONWithEnvPrefix(t *testing.T) {
 
 func TestExampleYAML_MultilineComment(t *testing.T) {
 	t.Run("scalar with multiline desc", func(t *testing.T) {
+		//nolint:tagliatelle
 		cfg := struct {
-			APIKey string `koanf:"api_key" desc:"API 密钥\n用于身份验证"`
+			APIKey string `json:"api_key" desc:"API 密钥\n用于身份验证"`
 		}{APIKey: "sk-test-123"}
 
 		yaml := string(ExampleYAML(cfg))
@@ -1199,11 +1090,11 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 
 	t.Run("struct with multiline desc", func(t *testing.T) {
 		type Server struct {
-			Host string `koanf:"host" desc:"主机"`
-			Port int    `koanf:"port" desc:"端口"`
+			Host string `json:"host" desc:"主机"`
+			Port int    `json:"port" desc:"端口"`
 		}
 		cfg := struct {
-			Server Server `koanf:"server" desc:"服务器配置\n包含主机和端口设置"`
+			Server Server `json:"server" desc:"服务器配置\n包含主机和端口设置"`
 		}{Server: Server{Host: "localhost", Port: 8080}}
 
 		yaml := string(ExampleYAML(cfg))
@@ -1216,7 +1107,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 
 	t.Run("desc with special characters", func(t *testing.T) {
 		cfg := struct {
-			Timeout int `koanf:"timeout" desc:"超时时间 (单位: 秒)"`
+			Timeout int `json:"timeout" desc:"超时时间 (单位: 秒)"`
 		}{Timeout: 30}
 
 		yaml := string(ExampleYAML(cfg))
@@ -1228,7 +1119,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 
 	t.Run("desc with YAML special chars", func(t *testing.T) {
 		cfg := struct {
-			Pattern string `koanf:"pattern" desc:"匹配模式: [a-z]+ # 正则表达式"`
+			Pattern string `json:"pattern" desc:"匹配模式: [a-z]+ # 正则表达式"`
 		}{Pattern: "test"}
 
 		yaml := string(ExampleYAML(cfg))
@@ -1241,7 +1132,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 
 	t.Run("desc with colon", func(t *testing.T) {
 		cfg := struct {
-			URL string `koanf:"url" desc:"服务地址: http://example.com"`
+			URL string `json:"url" desc:"服务地址: http://example.com"`
 		}{URL: "http://localhost"}
 
 		yaml := string(ExampleYAML(cfg))
@@ -1253,7 +1144,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 
 	t.Run("empty desc", func(t *testing.T) {
 		cfg := struct {
-			Name string `koanf:"name" desc:""`
+			Name string `json:"name" desc:""`
 		}{Name: "test"}
 
 		yaml := string(ExampleYAML(cfg))
@@ -1264,7 +1155,7 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 
 	t.Run("no desc tag", func(t *testing.T) {
 		cfg := struct {
-			Name string `koanf:"name"`
+			Name string `json:"name"`
 		}{Name: "test"}
 
 		yaml := string(ExampleYAML(cfg))
@@ -1276,12 +1167,12 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 
 	t.Run("mixed single and multiline", func(t *testing.T) {
 		type DB struct {
-			Host string `koanf:"host" desc:"数据库主机"`
-			Port int    `koanf:"port" desc:"端口号\n默认: 5432"`
+			Host string `json:"host" desc:"数据库主机"`
+			Port int    `json:"port" desc:"端口号\n默认: 5432"`
 		}
 		cfg := struct {
-			Name string `koanf:"name" desc:"应用名称"`
-			DB   DB     `koanf:"db" desc:"数据库配置\n支持 PostgreSQL"`
+			Name string `json:"name" desc:"应用名称"`
+			DB   DB     `json:"db" desc:"数据库配置\n支持 PostgreSQL"`
 		}{
 			Name: "myapp",
 			DB:   DB{Host: "localhost", Port: 5432},
@@ -1300,17 +1191,17 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 	})
 }
 
-// TestExampleYAML_MultilineCommentYAMLValidity 验证生成的 YAML 是否有效
+// TestExampleYAML_MultilineCommentYAMLValidity 验证生成的 YAML 是否有效。
 func TestExampleYAML_MultilineCommentYAMLValidity(t *testing.T) {
 	type Server struct {
-		Host    string `koanf:"host" desc:"服务主机\n支持 IPv4 和 IPv6"`
-		Port    int    `koanf:"port" desc:"监听端口"`
-		Timeout int    `koanf:"timeout" desc:"超时时间 (秒)\n0 表示不超时"`
+		Host    string `json:"host" desc:"服务主机\n支持 IPv4 和 IPv6"`
+		Port    int    `json:"port" desc:"监听端口"`
+		Timeout int    `json:"timeout" desc:"超时时间 (秒)\n0 表示不超时"`
 	}
 	type Config struct {
-		Name   string `koanf:"name" desc:"应用名称"`
-		Debug  bool   `koanf:"debug" desc:"调试模式\n启用后会输出详细日志"`
-		Server Server `koanf:"server" desc:"服务器配置\n包含网络相关设置"`
+		Name   string `json:"name" desc:"应用名称"`
+		Debug  bool   `json:"debug" desc:"调试模式\n启用后会输出详细日志"`
+		Server Server `json:"server" desc:"服务器配置\n包含网络相关设置"`
 	}
 
 	cfg := Config{
@@ -1355,15 +1246,13 @@ func TestSetCLIFlagValue_UnsupportedTypes(t *testing.T) {
 			&cli.StringFlag{Name: "dummy", Value: "test"},
 		},
 		Action: func(ctx context.Context, c *cli.Command) error {
-			k := koanf.New(".")
-			_ = k.Load(confmap.Provider(map[string]any{"dummy": "initial"}, "."), nil)
-
+			cfg := map[string]any{"dummy": "initial"}
 			// 测试不支持的基本类型 (complex128)
-			setCLIFlagValue(c, k, "dummy", "dummy", reflect.TypeFor[complex128]())
+			setCLIFlagValue(c, cfg, "dummy", "dummy", reflect.TypeFor[complex128]())
 			// 测试不支持的切片元素类型
-			setSliceFlagValue(c, k, "dummy", "dummy", reflect.TypeFor[[]complex128]())
+			setSliceFlagValue(c, cfg, "dummy", "dummy", reflect.TypeFor[[]complex128]())
 
-			loadedCfg = k.All()
+			loadedCfg = cfg
 
 			return nil
 		},

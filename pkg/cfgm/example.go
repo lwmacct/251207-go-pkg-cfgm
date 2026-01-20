@@ -14,16 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/providers/structs"
-	"github.com/knadh/koanf/v2"
 	yamlv3 "go.yaml.in/yaml/v3"
 )
 
-// ExampleYAML 将配置结构体序列化为带注释的 YAML。
+// ExampleYAML 将配置结构体序列化为带注释的 YAML 示例。
 //
-// 通过 desc tag 自动生成注释，适用于生成 config.example.yaml。
+// 使用 json tag 作为 key，desc tag 作为注释，适用于生成 config.example.yaml。
 //
 // 使用示例：
 //
@@ -44,21 +40,17 @@ func ExampleYAML[T any](cfg T) []byte {
 
 // MarshalYAML 将配置结构体序列化为 YAML（无注释）。
 //
-// 使用 koanf 原生 Marshal，输出简洁。
-//
 // 使用示例：
 //
 //	yaml := cfgm.MarshalYAML(cfg)
 //	os.WriteFile("config/config.yaml", yaml, 0644)
 func MarshalYAML[T any](cfg T) []byte {
-	k := koanf.New(".")
-	_ = k.Load(structs.Provider(cfg, "koanf"), nil)
-	data, _ := k.Marshal(yaml.Parser())
+	data, _ := yamlv3.Marshal(structToMap(cfg))
 
 	return data
 }
 
-// MarshalJSON 将配置结构体序列化为 JSON。
+// MarshalJSON 将配置结构体序列化为 JSON（带缩进）。
 //
 // 使用示例：
 //
@@ -90,7 +82,7 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 		field := typ.Field(i)
 		fieldVal := val.Field(i)
 
-		key := field.Tag.Get("koanf")
+		key := configTagName(field)
 		if key == "" {
 			continue
 		}
@@ -230,7 +222,7 @@ func valueToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 	}
 }
 
-// ConfigTestHelper 配置测试辅助工具
+// ConfigTestHelper 配置测试辅助工具。
 //
 // 使用示例：
 //
@@ -246,7 +238,7 @@ type ConfigTestHelper[T any] struct {
 	ConfigPath  string // 配置文件相对路径（相对于 go.mod 所在目录）
 }
 
-// WriteExampleFile 将示例配置写入文件
+// WriteExampleFile 将示例配置写入文件。
 func (h *ConfigTestHelper[T]) WriteExampleFile(t *testing.T, defaultConfig T) {
 	t.Helper()
 
@@ -270,7 +262,7 @@ func (h *ConfigTestHelper[T]) WriteExampleFile(t *testing.T, defaultConfig T) {
 	t.Logf("✅ 已生成配置示例文件: %s", outputPath)
 }
 
-// ValidateKeys 校验配置文件中的键名是否都在示例文件中定义
+// ValidateKeys 校验配置文件中的键名是否都在示例文件中定义。
 func (h *ConfigTestHelper[T]) ValidateKeys(t *testing.T) {
 	t.Helper()
 
@@ -340,11 +332,15 @@ func FindProjectRoot(skip int) (string, error) {
 
 // loadConfigKeys 加载配置文件并返回所有配置键（支持 YAML 和 JSON）。
 func loadConfigKeys(path string) ([]string, error) {
-	k := koanf.New(".")
-	err := k.Load(file.Provider(path), parserForPath(path))
+	content, err := os.ReadFile(path) //nolint:gosec // path is provided by test helpers/config paths
 	if err != nil {
 		return nil, fmt.Errorf("加载文件失败: %w", err)
 	}
 
-	return k.Keys(), nil
+	configMap, err := parseConfigBytes(path, content)
+	if err != nil {
+		return nil, fmt.Errorf("解析文件失败: %w", err)
+	}
+
+	return flattenMapKeys(configMap), nil
 }
