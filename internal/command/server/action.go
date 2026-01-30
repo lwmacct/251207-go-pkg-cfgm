@@ -22,6 +22,13 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 	cfg := cfgm.MustLoadCmd(cmd, config.DefaultConfig(), version.AppRawName)
 	mux := http.NewServeMux()
+
+	// 日志中记录配置信息（隐藏敏感信息）
+	slog.Info("Configuration loaded",
+		"redis_url", cfg.Redis.URL,
+		"redis_password_set", cfg.Redis.Password,
+	)
+
 	// 健康检查端点
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

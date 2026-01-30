@@ -10,7 +10,7 @@ type options struct {
 	baseDir             string // 路径基准目录，用于将相对路径转换为绝对路径
 	baseDirSet          bool   // 是否显式设置了 baseDir（区分空字符串和未设置）
 	envPrefix           string
-	noTemplateExpansion bool // 是否禁用配置文件模板展开（默认启用）
+	noTemplateExpansion bool // 是否禁用配置模板展开（默认启用）
 	callerSkip          int  // FindProjectRoot 的调用栈跳过层数（0 表示使用默认值）
 }
 
@@ -100,9 +100,9 @@ func WithEnvPrefix(prefix string) Option {
 	}
 }
 
-// WithoutTemplateExpansion 禁用配置文件的模板展开。
+// WithoutTemplateExpansion 禁用配置模板展开。
 //
-// 默认会执行 Shell 参数展开（如 ${VAR:-default}）。
+// 默认会对默认值与配置文件执行 Shell 参数展开（如 ${VAR:-default}）。
 // 该选项会保留原始 ${...} 字符串。
 func WithoutTemplateExpansion() Option {
 	return func(o *options) {

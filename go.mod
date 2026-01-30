@@ -3,10 +3,10 @@ module github.com/lwmacct/251207-go-pkg-cfgm
 go 1.25.0
 
 require (
-	github.com/go-viper/mapstructure/v2 v2.4.0
+	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/lwmacct/251207-go-pkg-version v0.1.260109
 	github.com/stretchr/testify v1.11.1
-	github.com/urfave/cli/v3 v3.6.1
+	github.com/urfave/cli/v3 v3.6.2
 	go.yaml.in/yaml/v3 v3.0.4
 )
 

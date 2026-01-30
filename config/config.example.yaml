@@ -2,13 +2,24 @@
 
 # 服务端配置
 server:
-  addr: ":8080" # 服务器监听地址
+  addr: ":40117" # 服务器监听地址
   docs: "docs/.vitepress/dist" # VitePress 文档目录路径
   timeout: 15s # HTTP 读写超时
   idletime: 1m0s # HTTP 空闲超时
 
 # 客户端配置
 client:
-  url: "${API_BASE_URL:-:8080}" # 服务器地址
+  url: "${API_BASE_URL:-:40117}" # 服务器地址
   timeout: 30s # 请求超时时间
   retries: 3 # 重试次数
+
+# Redis 配置
+redis:
+  url: "${REDIS_URL:-:redis://localhost:6379/0}" # Redis URL
+  password: "${REDISCLI_AUTH:-}" # Redis 密码 (REDISCLI_AUTH)
+  prefix: "" # Redis key 前缀
+  max-len: 0 # 日志最大长度
+  dial-timeout: 0s # 连接超时
+  read-timeout: 0s # 读超时
+  write-timeout: 0s # 写超时
+  disabled: false # 禁用 Redis

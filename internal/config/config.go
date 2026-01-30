@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Server ServerConfig `json:"server" desc:"服务端配置"`
 	Client ClientConfig `json:"client" desc:"客户端配置"`
+	Redis  RedisConfig  `json:"redis" desc:"Redis 配置"`
 }
 
 // ServerConfig 服务端配置。
@@ -32,20 +33,38 @@ type ClientConfig struct {
 	Retries int           `json:"retries" desc:"重试次数"`
 }
 
+// RedisConfig Redis 配置。
+//
+//nolint:tagliatelle
+type RedisConfig struct {
+	URL          string        `json:"url" desc:"Redis URL"`
+	Password     string        `json:"password" desc:"Redis 密码 (REDISCLI_AUTH)"`
+	Prefix       string        `json:"prefix" desc:"Redis key 前缀"`
+	MaxLen       int64         `json:"max-len" desc:"日志最大长度"`
+	DialTimeout  time.Duration `json:"dial-timeout" desc:"连接超时"`
+	ReadTimeout  time.Duration `json:"read-timeout" desc:"读超时"`
+	WriteTimeout time.Duration `json:"write-timeout" desc:"写超时"`
+	Disabled     bool          `json:"disabled" desc:"禁用 Redis"`
+}
+
 // DefaultConfig 返回默认配置。
 // 注意：internal/command/command.go 中的 Defaults 变量引用此函数以实现单一配置来源。
 func DefaultConfig() Config {
 	return Config{
 		Server: ServerConfig{
-			Addr:     ":8080",
+			Addr:     ":40117",
 			Docs:     "docs/.vitepress/dist",
 			Timeout:  15 * time.Second,
 			Idletime: 60 * time.Second,
 		},
 		Client: ClientConfig{
-			URL:     `${API_BASE_URL:-:8080}`,
+			URL:     `${API_BASE_URL:-:40117}`,
 			Timeout: 30 * time.Second,
 			Retries: 3,
+		},
+		Redis: RedisConfig{
+			URL:      `${REDIS_URL:-:redis://localhost:6379/0}`,
+			Password: `${REDISCLI_AUTH:-}`,
 		},
 	}
 }

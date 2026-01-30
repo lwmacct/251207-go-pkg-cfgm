@@ -3,6 +3,7 @@ package cfgm
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -53,6 +54,20 @@ func runCLITest[T any](t *testing.T, defaultCfg T, flags []cli.Flag, args []stri
 	require.NotNil(t, loadedCfg, "Config should be loaded")
 
 	return loadedCfg
+}
+
+func readServerAddr(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path) //nolint:gosec // test helper reads fixture path
+	require.NoError(t, err)
+	configMap, err := parseConfigBytes(path, content)
+	require.NoError(t, err)
+	serverMap, ok := configMap["server"].(map[string]any)
+	require.True(t, ok)
+	addr, ok := serverMap["addr"].(string)
+	require.True(t, ok)
+
+	return addr
 }
 
 // =============================================================================
@@ -248,12 +263,16 @@ func TestLoadWithBaseDir(t *testing.T) {
 
 	t.Run("default uses project root", func(t *testing.T) {
 		// 默认行为：相对路径基于项目根目录
+		root, err := FindProjectRoot(0)
+		require.NoError(t, err)
+		expectedAddr := readServerAddr(t, filepath.Join(root, "config/config.example.yaml"))
+
 		cfg, err := Load(
 			Config{Server: ServerConfig{Addr: "default"}},
 			WithConfigPaths("config/config.example.yaml"),
 		)
 		require.NoError(t, err)
-		assert.Equal(t, ":8080", cfg.Server.Addr)
+		assert.Equal(t, expectedAddr, cfg.Server.Addr)
 	})
 
 	t.Run("WithBaseDir empty uses cwd", func(t *testing.T) {
@@ -299,11 +318,15 @@ func TestLoadWithCallerSkip(t *testing.T) {
 	t.Run("with explicit callerSkip", func(t *testing.T) {
 		// 使用显式的 callerSkip 值
 		// skip=2 表示：跳过 load → Load → loadWithWrapper
+		root, err := FindProjectRoot(0)
+		require.NoError(t, err)
+		expectedAddr := readServerAddr(t, filepath.Join(root, "config/config.example.yaml"))
+
 		cfg, err := loadWithWrapper(2)
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 		// 验证配置文件被成功加载（说明项目根目录被正确找到）
-		assert.Equal(t, ":8080", cfg.Server.Addr)
+		assert.Equal(t, expectedAddr, cfg.Server.Addr)
 	})
 
 	t.Run("WithBaseDir takes precedence", func(t *testing.T) {
@@ -786,6 +809,21 @@ base_url: "https://api.openai.com"
 
 		assert.Equal(t, "sk-test-12345", cfg.APIKey)
 		assert.Equal(t, "gpt-4", cfg.Model)
+	})
+
+	t.Run("default values are expanded", func(t *testing.T) {
+		t.Setenv("DEFAULT_API_KEY", "env-default")
+
+		defaultCfg := Config{
+			APIKey:  "${DEFAULT_API_KEY:-fallback}",
+			Model:   "gpt-4",
+			BaseURL: "https://api.example.com",
+		}
+		missingPath := filepath.Join(t.TempDir(), "missing.yaml")
+		cfg, err := Load(defaultCfg, WithConfigPaths(missingPath))
+		require.NoError(t, err)
+
+		assert.Equal(t, "env-default", cfg.APIKey)
 	})
 
 	t.Run("fallback with default value", func(t *testing.T) {

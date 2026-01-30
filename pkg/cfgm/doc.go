@@ -66,7 +66,7 @@
 //
 // # 模板展开
 //
-// 读取配置文件前会进行字符串展开（YAML/JSON 均支持）。
+// 默认值与配置文件都会进行字符串展开（YAML/JSON 均支持）。
 // 使用 [WithoutTemplateExpansion] 可禁用该行为。
 //
 // 支持 Shell 参数展开：

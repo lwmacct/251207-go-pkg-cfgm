@@ -92,6 +92,11 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 	}
 
 	configMap := structToMap(defaultConfig)
+	if !options.noTemplateExpansion {
+		if _, err := expandTemplateValues(configMap); err != nil {
+			return nil, fmt.Errorf("expand template in defaults: %w", err)
+		}
+	}
 
 	// 2️⃣ 加载配置文件 (按顺序搜索，找到第一个即停止)
 	configLoaded := false
@@ -163,6 +168,40 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 	}
 
 	return &cfg, nil
+}
+
+func expandTemplateValues(value any) (any, error) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			expanded, err := expandTemplateValues(item)
+			if err != nil {
+				return nil, err
+			}
+			typed[key] = expanded
+		}
+		return typed, nil
+	case []any:
+		for i, item := range typed {
+			expanded, err := expandTemplateValues(item)
+			if err != nil {
+				return nil, err
+			}
+			typed[i] = expanded
+		}
+		return typed, nil
+	case string:
+		if !strings.Contains(typed, "$") {
+			return typed, nil
+		}
+		expanded, err := templexp.ExpandTemplate(typed)
+		if err != nil {
+			return nil, err
+		}
+		return expanded, nil
+	default:
+		return value, nil
+	}
 }
 
 // LoadCmd 是 [Load] 的便捷版本，适用于 CLI 场景。
