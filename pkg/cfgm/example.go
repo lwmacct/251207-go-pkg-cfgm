@@ -70,7 +70,7 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 	// 处理指针类型
 	if val.Kind() == reflect.Ptr {
 		if val.IsNil() {
-			return &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!null"}
+			return &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!null", Value: "null"}
 		}
 		val = val.Elem()
 		typ = typ.Elem()
@@ -95,9 +95,7 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 		var valNode *yamlv3.Node
 
 		// 判断是否为复杂类型（结构体或数组）
-		isStruct := field.Type.Kind() == reflect.Struct &&
-			field.Type != reflect.TypeFor[time.Duration]() &&
-			field.Type != reflect.TypeFor[time.Time]()
+		isStruct := isStructType(field.Type)
 		isSlice := field.Type.Kind() == reflect.Slice
 
 		switch {
@@ -131,6 +129,25 @@ func setSimpleFieldComment(keyNode, valNode *yamlv3.Node, comment string) {
 
 // valueToNode 将值转换为 yamlv3.Node。
 func valueToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
+	if !val.IsValid() {
+		return &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!null", Value: "null"}
+	}
+
+	if val.Kind() == reflect.Interface {
+		if val.IsNil() {
+			return &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!null", Value: "null"}
+		}
+		inner := val.Elem()
+		return valueToNode(inner, inner.Type())
+	}
+
+	if typ.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!null", Value: "null"}
+		}
+		return valueToNode(val.Elem(), typ.Elem())
+	}
+
 	// 特殊类型处理
 	switch typ {
 	case reflect.TypeFor[time.Duration]():
@@ -147,6 +164,10 @@ func valueToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 				Value: t.Format(time.RFC3339),
 			}
 		}
+	}
+
+	if typ.Kind() == reflect.Struct {
+		return structToNode(val, typ)
 	}
 
 	switch val.Kind() {
