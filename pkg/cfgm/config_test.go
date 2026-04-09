@@ -33,9 +33,16 @@ func writeTempConfig(t *testing.T, content string) string {
 // runCLITest 运行 CLI 命令并返回加载的配置。
 func runCLITest[T any](t *testing.T, defaultCfg T, flags []cli.Flag, args []string, opts ...Option) *T {
 	t.Helper()
+
+	return runNamedCLITest(t, "test", defaultCfg, flags, args, opts...)
+}
+
+// runNamedCLITest 运行指定命令名的 CLI 命令并返回加载的配置。
+func runNamedCLITest[T any](t *testing.T, commandName string, defaultCfg T, flags []cli.Flag, args []string, opts ...Option) *T {
+	t.Helper()
 	var loadedCfg *T
 	cmd := &cli.Command{
-		Name:  "test",
+		Name:  commandName,
 		Flags: flags,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			allOpts := append([]Option{}, opts...)
@@ -363,8 +370,8 @@ func TestLoadWithCommand(t *testing.T) {
 	flags := []cli.Flag{
 		&cli.StringFlag{Name: "name", Value: defaultCfg.Name},
 		&cli.BoolFlag{Name: "debug", Value: defaultCfg.Debug},
-		&cli.StringFlag{Name: "server-addr", Value: defaultCfg.Server.Addr},
-		&cli.DurationFlag{Name: "server-timeout", Value: defaultCfg.Server.Timeout},
+		&cli.StringFlag{Name: "addr", Value: defaultCfg.Server.Addr},
+		&cli.DurationFlag{Name: "timeout", Value: defaultCfg.Server.Timeout},
 	}
 
 	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--name", "cli-app", "--debug"})
@@ -387,23 +394,26 @@ func TestLoadWithCommand_NestedFlags(t *testing.T) {
 
 	defaultCfg := Config{Server: ServerConfig{Addr: ":8080", Timeout: 30 * time.Second}}
 	flags := []cli.Flag{
-		&cli.StringFlag{Name: "server-addr", Value: defaultCfg.Server.Addr},
-		&cli.DurationFlag{Name: "server-timeout", Value: defaultCfg.Server.Timeout},
+		&cli.StringFlag{Name: "addr", Value: defaultCfg.Server.Addr},
+		&cli.DurationFlag{Name: "timeout", Value: defaultCfg.Server.Timeout},
 	}
 
-	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--server-addr", ":9090", "--server-timeout", "60s"})
+	cfg := runNamedCLITest(t, "server", defaultCfg, flags, []string{"server", "--addr", ":9090", "--timeout", "60s"})
 
 	assert.Equal(t, ":9090", cfg.Server.Addr)
 	assert.Equal(t, 60*time.Second, cfg.Server.Timeout)
 }
 
 func TestLoadWithCommand_SubCommands(t *testing.T) {
-	type Config struct {
+	type ClientConfig struct {
 		URL     string `json:"url"`
 		Timeout int    `json:"timeout"`
 	}
+	type Config struct {
+		Client ClientConfig `json:"client"`
+	}
 
-	defaultCfg := Config{URL: "http://localhost:8080", Timeout: 30}
+	defaultCfg := Config{Client: ClientConfig{URL: "http://localhost:8080", Timeout: 30}}
 	var loadedCfg *Config
 	var executed bool
 
@@ -425,8 +435,8 @@ func TestLoadWithCommand_SubCommands(t *testing.T) {
 		Name:     "client",
 		Commands: []*cli.Command{subCmd},
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "url", Value: defaultCfg.URL},
-			&cli.IntFlag{Name: "timeout", Value: defaultCfg.Timeout},
+			&cli.StringFlag{Name: "url", Value: defaultCfg.Client.URL},
+			&cli.IntFlag{Name: "timeout", Value: defaultCfg.Client.Timeout},
 		},
 	}
 
@@ -434,8 +444,39 @@ func TestLoadWithCommand_SubCommands(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, executed)
 
-	assert.Equal(t, "http://prod:8080", loadedCfg.URL, "parent flag inherited")
-	assert.Equal(t, 30, loadedCfg.Timeout, "unset keeps default")
+	assert.Equal(t, "http://prod:8080", loadedCfg.Client.URL, "parent flag inherited")
+	assert.Equal(t, 30, loadedCfg.Client.Timeout, "unset keeps default")
+}
+
+func TestLoadWithCommand_AmbiguousLeafFlag(t *testing.T) {
+	type EndpointConfig struct {
+		Addr string `json:"addr"`
+	}
+	type Config struct {
+		Client EndpointConfig `json:"client"`
+		Server EndpointConfig `json:"server"`
+	}
+
+	defaultCfg := Config{
+		Client: EndpointConfig{Addr: "client-default"},
+		Server: EndpointConfig{Addr: "server-default"},
+	}
+
+	cmd := &cli.Command{
+		Name: "test",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "addr"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			_, err := Load(defaultCfg, WithCommand(cmd))
+
+			return err
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{"test", "--addr", ":9090"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CLI flag --addr is ambiguous")
 }
 
 func TestLoadWithCommand_Priority(t *testing.T) {

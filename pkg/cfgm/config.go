@@ -158,7 +158,9 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 
 	// 4️⃣ 加载 CLI flags (最高优先级，仅当用户明确指定时)
 	if options.cmd != nil {
-		applyCLIFlagsGeneric(options.cmd, configMap, defaultConfig)
+		if err := applyCLIFlagsGeneric(options.cmd, configMap, defaultConfig); err != nil {
+			return nil, err
+		}
 	}
 
 	// 解析到结构体
@@ -338,11 +340,12 @@ func generateEnvBindings(prefix string, keys []string) map[string]string {
 
 // applyCLIFlagsGeneric 将用户显式设置的 CLI flags 写入配置 map。
 //
-// 根据 json tag 生成 CLI flag 名称，仅替换 "." 为 "-"。
+// 新语义以叶子字段名作为 flag 名，并优先使用命令链路推导配置作用域：
+//   - `server.addr` 在 `server` 命令下映射为 `--addr`
+//   - `client.timeout` 在 `client health` 下仍映射为 `--timeout`
+//   - 无命令作用域时，顶层叶子优先；否则要求叶子名在全局唯一
 //
-// 映射示例 (json tag → CLI flags)：
-//   - server.url → --server-url
-//   - tls.skip_verify → --tls-skip_verify
+// 同名叶子字段若无法唯一解析，会直接报错而不是静默忽略。
 //
 // 支持的类型：
 //   - 基本类型: string, bool
@@ -352,49 +355,27 @@ func generateEnvBindings(prefix string, keys []string) map[string]string {
 //   - 时间类型: time.Duration, time.Time
 //   - 切片类型: []string, []int, []int64, []float64 等
 //   - Map 类型: map[string]string
-func applyCLIFlagsGeneric[T any](cmd *cli.Command, config map[string]any, defaultConfig T) {
-	applyCLIFlagsRecursive(cmd, config, reflect.TypeOf(defaultConfig), "")
-}
+func applyCLIFlagsGeneric[T any](cmd *cli.Command, config map[string]any, defaultConfig T) error {
+	index := newCLIConfigIndex(reflect.TypeOf(defaultConfig))
+	scope := inferCommandScope(cmd, index.rootType)
 
-// applyCLIFlagsRecursive 递归遍历结构体字段并应用 CLI flags。
-func applyCLIFlagsRecursive(cmd *cli.Command, config map[string]any, typ reflect.Type, prefix string) {
-	if typ.Kind() == reflect.Pointer {
-		typ = typ.Elem()
-	}
-	if typ.Kind() != reflect.Struct {
-		return
-	}
-
-	for i := range typ.NumField() {
-		field := typ.Field(i)
-
-		// 获取 json 标签作为配置 key
-		key := configTagName(field)
-		if key == "" {
+	for _, flagName := range index.flagNames {
+		if !cmd.IsSet(flagName) {
 			continue
 		}
 
-		// 构建完整的配置 key
-		fullKey := key
-		if prefix != "" {
-			fullKey = prefix + "." + key
+		field, ok, err := index.resolveField(scope, flagName)
+		if err != nil {
+			return err
 		}
-
-		// 如果是嵌套结构体，递归处理
-		if isStructType(field.Type) {
-			applyCLIFlagsRecursive(cmd, config, field.Type, fullKey)
-
+		if !ok {
 			continue
 		}
 
-		cliFlag := strings.ReplaceAll(fullKey, ".", "-")
-		if !cmd.IsSet(cliFlag) {
-			continue
-		}
-
-		// 根据字段类型获取值并设置
-		setCLIFlagValue(cmd, config, fullKey, cliFlag, field.Type)
+		setCLIFlagValue(cmd, config, field.configPath, flagName, field.fieldType)
 	}
+
+	return nil
 }
 
 // setCLIFlagValue 按字段类型读取 CLI 值并写入配置 map。

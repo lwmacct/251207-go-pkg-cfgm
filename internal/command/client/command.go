@@ -2,7 +2,6 @@
 package client
 
 import (
-	"github.com/lwmacct/251207-go-pkg-version/pkg/version"
 	"github.com/urfave/cli/v3"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/internal/command"
@@ -14,25 +13,24 @@ var Command = &cli.Command{
 	Usage: "HTTP 客户端工具",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:    "client-url",
+			Name:    "url",
 			Aliases: []string{"s"},
 			Value:   command.Defaults.Client.URL,
 			Usage:   "服务器地址",
 		},
 		&cli.DurationFlag{
-			Name:  "client-timeout",
+			Name:  "timeout",
 			Value: command.Defaults.Client.Timeout,
 			Usage: "请求超时时间",
 		},
 		&cli.IntFlag{
-			Name:  "client-retries",
+			Name:  "retries",
 			Value: command.Defaults.Client.Retries,
 			Usage: "重试次数",
 		},
 	},
 	Action: action,
 	Commands: []*cli.Command{
-		version.Command,
 		{
 			Name:   "health",
 			Usage:  "检查服务器健康状态",

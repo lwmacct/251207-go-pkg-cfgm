@@ -83,9 +83,12 @@
 //
 // # CLI Flag 映射
 //
-// 仅替换 "." 为 "-"：
-//   - server.url → --server-url
-//   - tls.skip_verify → --tls-skip_verify
+// CLI flag 默认使用叶子字段名，并根据命令链路推导配置作用域：
+//   - `server` 命令下，`server.addr` → `--addr`
+//   - `client health` 命令下，`client.timeout` → `--timeout`
+//   - 无命令作用域时，顶层叶子优先；否则要求叶子名全局唯一
+//
+// 若同名叶子字段无法唯一解析，Load / LoadCmd 会返回错误，而不是静默忽略。
 //
 // # 生成配置示例
 //
