@@ -1,8 +1,6 @@
 module github.com/lwmacct/251207-go-pkg-cfgm
 
-go 1.26.0
-
-toolchain go1.26.1
+go 1.26.1
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
