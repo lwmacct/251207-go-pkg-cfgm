@@ -17,8 +17,17 @@ import (
 )
 
 func action(ctx context.Context, cmd *cli.Command) error {
-	// 默认行为：显示帮助
-	return cli.ShowAppHelp(cmd)
+	if cmd.NArg() == 0 {
+		return cli.ShowSubcommandHelp(cmd)
+	}
+
+	name := cmd.Args().First()
+	errMsg := fmt.Sprintf("unknown client subcommand %q", name)
+	if suggestion := cli.SuggestCommand(cmd.Commands, name); suggestion != "" {
+		errMsg += ". " + fmt.Sprintf(cli.SuggestDidYouMeanTemplate, suggestion)
+	}
+
+	return cli.Exit(errMsg, 3)
 }
 
 func healthAction(ctx context.Context, cmd *cli.Command) error {

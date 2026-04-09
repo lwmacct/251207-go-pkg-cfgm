@@ -58,7 +58,7 @@ func DefaultConfig() Config {
 			Idletime: 60 * time.Second,
 		},
 		Client: ClientConfig{
-			URL:     ":40117",
+			URL:     "http://127.0.0.1:40117",
 			Timeout: 30 * time.Second,
 			Retries: 3,
 		},

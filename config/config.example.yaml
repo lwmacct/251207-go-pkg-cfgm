@@ -9,7 +9,7 @@ server:
 
 # 客户端配置
 client:
-  url: ":40117" # 服务器地址
+  url: "http://127.0.0.1:40117" # 服务器地址
   timeout: 30s # 请求超时时间
   retries: 3 # 重试次数
 

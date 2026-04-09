@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,34 +21,16 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	// 加载配置：默认值 → 配置文件 → 环境变量 → CLI flags
 
 	cfg := cfgm.MustLoadCmd(cmd, config.DefaultConfig(), "")
-	mux := http.NewServeMux()
 
 	// 日志中记录配置信息（隐藏敏感信息）
 	slog.Info("Configuration loaded",
 		"redis_url", cfg.Redis.URL,
-		"redis_password_set", cfg.Redis.Password,
+		"redis_password_set", cfg.Redis.Password != "",
 	)
-
-	// 健康检查端点
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
-	})
-
-	// VitePress 文档静态文件服务
-	docsFS := http.FileServer(http.Dir(cfg.Server.Docs))
-	mux.Handle("/docs/", http.StripPrefix("/docs/", docsFS))
-
-	// 默认首页（{$} 精确匹配根路径）
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"message":"Hello, World!"}`)
-	})
 
 	server := &http.Server{
 		Addr:         cfg.Server.Addr,
-		Handler:      mux,
+		Handler:      newMux(cfg),
 		ReadTimeout:  cfg.Server.Timeout,
 		WriteTimeout: cfg.Server.Timeout,
 		IdleTimeout:  cfg.Server.Idletime,
@@ -85,4 +68,39 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	slog.Info("Server stopped gracefully")
 
 	return nil
+}
+
+func newMux(cfg *config.Config) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// 健康检查端点
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+	})
+
+	// VitePress 文档静态文件服务
+	docsFS := http.FileServer(http.Dir(cfg.Server.Docs))
+	mux.Handle("/docs/", http.StripPrefix("/docs/", docsFS))
+
+	// 默认首页（{$} 精确匹配根路径）
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"message":"Hello, World!"}`)
+	})
+
+	// 示例 GET 端点，便于 client get 直接验证请求链路。
+	mux.HandleFunc("GET /path", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Message string `json:"message"`
+			Path    string `json:"path"`
+		}{
+			Message: "Hello, World!",
+			Path:    r.URL.Path,
+		})
+	})
+
+	return mux
 }
