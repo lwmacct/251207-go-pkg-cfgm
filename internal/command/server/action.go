@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/lwmacct/251207-go-pkg-version/pkg/version"
 	"github.com/urfave/cli/v3"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
@@ -20,7 +19,7 @@ import (
 func action(ctx context.Context, cmd *cli.Command) error {
 	// 加载配置：默认值 → 配置文件 → 环境变量 → CLI flags
 
-	cfg := cfgm.MustLoadCmd(cmd, config.DefaultConfig(), version.AppRawName)
+	cfg := cfgm.MustLoadCmd(cmd, config.DefaultConfig(), "")
 	mux := http.NewServeMux()
 
 	// 日志中记录配置信息（隐藏敏感信息）

@@ -14,7 +14,6 @@ import (
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
 	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm"
-	"github.com/lwmacct/251207-go-pkg-version/pkg/version"
 )
 
 func action(ctx context.Context, cmd *cli.Command) error {
@@ -23,7 +22,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 }
 
 func healthAction(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := cfgm.LoadCmd(cmd, config.DefaultConfig(), version.AppRawName)
+	cfg, err := cfgm.LoadCmd(cmd, config.DefaultConfig(), "")
 	if err != nil {
 		return err
 	}
@@ -41,7 +40,7 @@ func healthAction(ctx context.Context, cmd *cli.Command) error {
 }
 
 func getAction(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := cfgm.LoadCmd(cmd, config.DefaultConfig(), version.AppRawName)
+	cfg, err := cfgm.LoadCmd(cmd, config.DefaultConfig(), "")
 	if err != nil {
 		return err
 	}
