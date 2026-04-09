@@ -10,6 +10,7 @@ type options struct {
 	baseDir             string // 路径基准目录，用于将相对路径转换为绝对路径
 	baseDirSet          bool   // 是否显式设置了 baseDir（区分空字符串和未设置）
 	envPrefix           string
+	envPrefixSet        bool
 	noTemplateExpansion bool // 是否禁用配置模板展开（默认启用）
 	callerSkip          int  // FindProjectRoot 的调用栈跳过层数（0 表示使用默认值）
 }
@@ -82,11 +83,14 @@ func WithCallerSkip(skip int) Option {
 	}
 }
 
-// WithEnvPrefix 启用环境变量前缀解析。
+// WithEnvPrefix 设置环境变量前缀。
 //
 // 环境变量命名规则：
 //   - 前缀 + 大写的配置 key
 //   - 点号 (.) 和连字符 (-) 转为下划线 (_)
+//
+// 默认前缀为 "APP_"；显式调用后以传入值为准。
+// 传入空字符串可禁用默认的前缀绑定。
 //
 // 示例 (前缀为 "MYAPP_")：
 //   - MYAPP_DEBUG → debug
@@ -97,6 +101,7 @@ func WithCallerSkip(skip int) Option {
 func WithEnvPrefix(prefix string) Option {
 	return func(o *options) {
 		o.envPrefix = prefix
+		o.envPrefixSet = true
 	}
 }
 

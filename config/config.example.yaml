@@ -9,14 +9,14 @@ server:
 
 # 客户端配置
 client:
-  url: "${API_BASE_URL:-:40117}" # 服务器地址
+  url: ":40117" # 服务器地址
   timeout: 30s # 请求超时时间
   retries: 3 # 重试次数
 
 # Redis 配置
 redis:
   url: "${REDIS_URL:-:redis://localhost:6379/0}" # Redis URL
-  password: "${REDISCLI_AUTH:-}" # Redis 密码 (REDISCLI_AUTH)
+  password: "${REDISCLI_AUTH}" # Redis 密码 (REDISCLI_AUTH)
   prefix: "" # Redis key 前缀
   max-len: 0 # 日志最大长度
   dial-timeout: 0s # 连接超时

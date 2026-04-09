@@ -100,6 +100,38 @@ func TestLoadWithEnvPrefix(t *testing.T) {
 	assert.Equal(t, "http://test:8080", cfg.Server.URL)
 }
 
+func TestLoadWithDefaultEnvPrefix(t *testing.T) {
+	type ServerConfig struct {
+		URL string `json:"url"`
+	}
+	type Config struct {
+		Debug  bool         `json:"debug"`
+		Server ServerConfig `json:"server"`
+	}
+
+	t.Setenv("APP_DEBUG", "true")
+	t.Setenv("APP_SERVER_URL", "http://app-default:8080")
+
+	cfg, err := Load(Config{Debug: false, Server: ServerConfig{URL: "http://default:8080"}})
+	require.NoError(t, err)
+
+	assert.True(t, cfg.Debug)
+	assert.Equal(t, "http://app-default:8080", cfg.Server.URL)
+}
+
+func TestLoadWithExplicitEmptyEnvPrefixDisablesDefault(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	t.Setenv("APP_NAME", "from-default-prefix")
+
+	cfg, err := Load(Config{Name: "default"}, WithEnvPrefix(""))
+	require.NoError(t, err)
+
+	assert.Equal(t, "default", cfg.Name)
+}
+
 func TestAutoEnvBinding(t *testing.T) {
 	//nolint:tagliatelle
 	type ClientConfig struct {

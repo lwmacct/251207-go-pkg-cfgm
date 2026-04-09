@@ -74,6 +74,10 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 		callerSkip = options.callerSkip
 	}
 
+	if !options.envPrefixSet {
+		options.envPrefix = "APP_"
+	}
+
 	// 默认使用项目根目录作为相对路径基准
 	if !options.baseDirSet {
 		if root, err := FindProjectRoot(callerSkip); err == nil {

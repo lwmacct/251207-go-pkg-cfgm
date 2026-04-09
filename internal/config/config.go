@@ -3,7 +3,7 @@
 // 配置加载优先级 (从低到高)：
 //  1. 默认值 - DefaultConfig() 函数中定义
 //  2. 配置文件 - 通过 WithAppName / WithConfigPaths 选项设置
-//  3. 环境变量 - 通过 WithEnvPrefix 选项启用
+//  3. 环境变量 - 默认使用 APP_ 前缀，可通过 WithEnvPrefix 覆盖或禁用
 //  4. CLI flags - 通过 WithCommand 选项设置
 package config
 
@@ -58,14 +58,14 @@ func DefaultConfig() Config {
 			Idletime: 60 * time.Second,
 		},
 		Client: ClientConfig{
-			URL:     `${API_BASE_URL:-:40117}`,
+			URL:     ":40117",
 			Timeout: 30 * time.Second,
 			Retries: 3,
 		},
 		Redis: RedisConfig{
 			URL: `${REDIS_URL:-:redis://localhost:6379/0}`,
 			// #nosec G101 -- shell-style template placeholder references an env var, not a hardcoded secret.
-			Password: `${REDISCLI_AUTH:-}`,
+			Password: `${REDISCLI_AUTH}`,
 		},
 	}
 }

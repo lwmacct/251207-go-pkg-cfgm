@@ -7,7 +7,7 @@
 //
 //  1. 默认值 - 通过 defaultConfig 参数传入
 //  2. 配置文件 - 通过 [WithConfigPaths] 或 [WithAppName] 设置
-//  3. 环境变量(前缀) - 通过 [WithEnvPrefix] 自动生成绑定
+//  3. 环境变量(前缀) - 默认使用 APP_，可通过 [WithEnvPrefix] 覆盖或禁用
 //  4. CLI flags - 通过 [WithCommand] 选项设置，最高优先级
 //
 // # 快速开始
@@ -23,7 +23,7 @@
 // 推荐使用 LoadCmd：
 //
 //	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp",
-//	    cfgm.WithEnvPrefix("MYAPP_"),
+//	    cfgm.WithEnvPrefix("MYAPP_"), // 可选；不传时默认使用 APP_
 //	)
 //
 // 或使用 Load 组合选项：
@@ -55,7 +55,10 @@
 //
 // # 环境变量(前缀)
 //
-// 通过 [WithEnvPrefix] 启用环境变量支持：
+// 默认会使用 "APP_" 前缀生成环境变量绑定。
+// 调用 [WithEnvPrefix] 可覆盖默认前缀；传入空字符串可禁用该行为。
+//
+// 环境变量命名规则：
 //   - 前缀 + 大写的配置 key
 //   - 点号 (.) 和连字符 (-) 转为下划线 (_)
 //
