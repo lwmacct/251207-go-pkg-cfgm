@@ -63,7 +63,8 @@ func DefaultConfig() Config {
 			Retries: 3,
 		},
 		Redis: RedisConfig{
-			URL:      `${REDIS_URL:-:redis://localhost:6379/0}`,
+			URL: `${REDIS_URL:-:redis://localhost:6379/0}`,
+			// #nosec G101 -- shell-style template placeholder references an env var, not a hardcoded secret.
 			Password: `${REDISCLI_AUTH:-}`,
 		},
 	}

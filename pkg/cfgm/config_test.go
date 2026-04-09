@@ -856,6 +856,7 @@ base_url: "https://api.openai.com"
 		t.Setenv("DEFAULT_API_KEY", "env-default")
 
 		defaultCfg := Config{
+			// #nosec G101 -- test fixture verifies template expansion and does not embed a real credential.
 			APIKey:  "${DEFAULT_API_KEY:-fallback}",
 			Model:   "gpt-4",
 			BaseURL: "https://api.example.com",
