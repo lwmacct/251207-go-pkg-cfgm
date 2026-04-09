@@ -60,8 +60,7 @@ func structValueToMap(val reflect.Value, typ reflect.Type) map[string]any {
 	}
 
 	out := make(map[string]any)
-	for i := range typ.NumField() {
-		field := typ.Field(i)
+	for field := range typ.Fields() {
 		if field.PkgPath != "" {
 			continue
 		}
@@ -71,7 +70,7 @@ func structValueToMap(val reflect.Value, typ reflect.Type) map[string]any {
 			continue
 		}
 
-		fieldVal := val.Field(i)
+		fieldVal := val.FieldByIndex(field.Index)
 		out[key] = valueToAny(fieldVal, field.Type)
 	}
 

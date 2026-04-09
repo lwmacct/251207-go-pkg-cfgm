@@ -78,9 +78,8 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 
 	node := &yamlv3.Node{Kind: yamlv3.MappingNode}
 
-	for i := range typ.NumField() {
-		field := typ.Field(i)
-		fieldVal := val.Field(i)
+	for field := range typ.Fields() {
+		fieldVal := val.FieldByIndex(field.Index)
 
 		key := configTagName(field)
 		if key == "" {

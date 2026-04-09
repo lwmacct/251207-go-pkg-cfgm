@@ -46,8 +46,7 @@ func (i *cliConfigIndex) collect(typ reflect.Type, prefix string) {
 		return
 	}
 
-	for fieldIdx := range typ.NumField() {
-		field := typ.Field(fieldIdx)
+	for field := range typ.Fields() {
 		key := configTagName(field)
 		if key == "" {
 			continue
@@ -98,8 +97,7 @@ func findNestedStructType(typ reflect.Type, key string) (reflect.Type, bool) {
 		return nil, false
 	}
 
-	for fieldIdx := range typ.NumField() {
-		field := typ.Field(fieldIdx)
+	for field := range typ.Fields() {
 		if configTagName(field) != key || !isStructType(field.Type) {
 			continue
 		}

@@ -297,9 +297,7 @@ func collectConfigKeysRecursive(typ reflect.Type, prefix string, keys *[]string)
 		return
 	}
 
-	for i := range typ.NumField() {
-		field := typ.Field(i)
-
+	for field := range typ.Fields() {
 		key := configTagName(field)
 		if key == "" {
 			continue
