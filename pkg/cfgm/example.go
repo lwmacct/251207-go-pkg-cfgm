@@ -35,7 +35,20 @@ func ExampleYAML[T any](cfg T) []byte {
 	_ = enc.Encode(node)
 	_ = enc.Close()
 
-	return buf.Bytes()
+	return normalizeBlankLines(buf.Bytes())
+}
+
+// normalizeBlankLines removes indentation from whitespace-only lines while
+// preserving line count and surrounding content.
+func normalizeBlankLines(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lines[i] = ""
+		}
+	}
+
+	return []byte(strings.Join(lines, "\n"))
 }
 
 // MarshalYAML 将配置结构体序列化为 YAML（无注释）。

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1341,6 +1342,30 @@ func TestExampleYAML_MultilineCommentYAMLValidity(t *testing.T) {
 	a.Equal("0.0.0.0", parsed.Server.Host)
 	a.Equal(8080, parsed.Server.Port)
 	a.Equal(30, parsed.Server.Timeout)
+}
+
+func TestExampleYAML_BlankLinesDoNotKeepIndentation(t *testing.T) {
+	type DB struct {
+		Host string `json:"host" desc:"数据库主机"`
+		Port int    `json:"port" desc:"端口号\n默认: 5432"`
+	}
+	type Config struct {
+		DB DB `json:"db" desc:"数据库配置\n支持 PostgreSQL"`
+	}
+
+	yaml := string(ExampleYAML(Config{
+		DB: DB{
+			Host: "localhost",
+			Port: 5432,
+		},
+	}))
+
+	lines := strings.SplitSeq(yaml, "\n")
+	for line := range lines {
+		assert.NotEqual(t, "  ", line, "blank lines should not keep indentation")
+		assert.NotEqual(t, "\t", line, "blank lines should not keep indentation")
+	}
+	assert.Contains(t, yaml, "host: \"localhost\" # 数据库主机\n\n  # 端口号\n  # 默认: 5432\n  port: 5432\n")
 }
 
 // =============================================================================
