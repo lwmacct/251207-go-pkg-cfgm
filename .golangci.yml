@@ -35,11 +35,15 @@ linters:
     - gosmopolitan # i18n
     # 已弃用
     - wsl
-    - tagalign # struct tag 对齐, 负优化
+    - gomodguard
     # 注释要求过严
     - revive # 与 staticcheck 重复，规则过严
     - errname # 错误命名规则
     - goprintffuncname # printf 函数命名
+    # 不合理的优化
+    - tagalign # struct tag 对齐, 负优化
+    - tagliatelle # JSON tag 使用 snake_case 以兼容 OpenAI/Anthropic/Gemini API
+    - goconst # 协议适配和测试中的字符串字面量是合理的
 
   settings:
     govet:
@@ -53,6 +57,8 @@ linters:
     gocritic: {}
     exhaustive:
       default-signifies-exhaustive: true
+    nestif:
+      min-complexity: 3 # JSON 解析等场景允许适度嵌套
 
 formatters:
   enable:

@@ -81,7 +81,7 @@ func MarshalJSON[T any](cfg T) []byte {
 // structToNode 将结构体转换为带注释的 yamlv3.Node。
 func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 	// 处理指针类型
-	if val.Kind() == reflect.Ptr {
+	if val.Kind() == reflect.Pointer {
 		if val.IsNil() {
 			return &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!null", Value: "null"}
 		}
@@ -153,7 +153,7 @@ func valueToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 		return valueToNode(inner, inner.Type())
 	}
 
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		if val.IsNil() {
 			return &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!null", Value: "null"}
 		}

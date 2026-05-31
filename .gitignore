@@ -1,43 +1,47 @@
-# 本地环境
-**/.DS_Store
-**/.local/*
-**/.venv/*
-**/.conda/*
-**/.task/remote/*
+# .gitignore
 
-# 秘密文件
-**/.env
-**/.secret/*
+# 运行环境
+**/.DS_Store
+**/.local/
+**/.venv/
+**/.conda/
+**/.task/remote/
 
 # node_modules
-**/node_modules/**
-**/pnpm-lock.yaml
-**/yarn.lock
+**/node_modules/
 **/tsconfig.tsbuildinfo
 
+# 构建输出
+bin-*
+bin/
+dist/
+build/
+*.vsix
+[0-9]*-
+
+# 生成文件
+gen/
+
+# 临时文件
+**/*.bak
+**/*.log
+**/*.tmp
+**/*.out
+**/*.temp
+**/*.cache
+
 # 临时目录
-**/tmp/**
-**/log/**
-**/logs/**
-**/temp/**
-**/cache/**
+tmp/**
+log/**
+logs/**
+temp/**
+cache/**
 
-# python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.pyw
-*.pyz
-*.pywz
-*.pyzw
+# secret files
+.env
+.env.*
+!.env.example
+config/config.yaml
 
-# build binaries
-/bin/
-/main
-/client
-/server
-
-# AI Agent 相关
-# **/.agent/*
-# **/.claude/*
+# AI tools
+.playwright-mcp

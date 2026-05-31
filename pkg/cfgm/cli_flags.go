@@ -65,8 +65,8 @@ func (i *cliConfigIndex) commandScopes(cmd *cli.Command) []string {
 	var scopes []string
 	scope := ""
 	lineage := cmd.Lineage()
-	for idx := len(lineage) - 1; idx >= 0; idx-- {
-		name := lineage[idx].Name
+	for _, cmd := range slices.Backward(lineage) {
+		name := cmd.Name
 		nextType, ok := findNestedStructType(currentType, name)
 		if !ok {
 			continue
