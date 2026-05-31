@@ -342,12 +342,12 @@ func generateEnvBindings(prefix string, keys []string) map[string]string {
 
 // applyCLIFlagsGeneric 将用户显式设置的 CLI flags 写入配置 map。
 //
-// 新语义以叶子字段名作为 flag 名，并优先使用命令链路推导配置作用域：
+// CLI flag 使用配置路径，并移除与命令链匹配的作用域前缀：
 //   - `server.addr` 在 `server` 命令下映射为 `--addr`
-//   - `client.timeout` 在 `client health` 下仍映射为 `--timeout`
-//   - 无命令作用域时，顶层叶子优先；否则要求叶子名在全局唯一
+//   - `client.server.addr` 在 `client` 命令下映射为 `--server.addr`
+//   - 无命令作用域时保留完整路径，如 `server.addr` 映射为 `--server.addr`
 //
-// 同名叶子字段若无法唯一解析，会直接报错而不是静默忽略。
+// 同一命令下生成的 flag 名若重复，会直接报错而不是静默忽略。
 //
 // 支持的类型：
 //   - 基本类型: string, bool
@@ -359,21 +359,20 @@ func generateEnvBindings(prefix string, keys []string) map[string]string {
 //   - Map 类型: map[string]string
 func applyCLIFlagsGeneric[T any](cmd *cli.Command, config map[string]any, defaultConfig T) error {
 	index := newCLIConfigIndex(reflect.TypeOf(defaultConfig))
-	scope := inferCommandScope(cmd, index.rootType)
+	fields, flagNames, err := index.commandFields(cmd)
+	if err != nil {
+		return err
+	}
+	if err := validateCommandFlags(cmd, fields); err != nil {
+		return err
+	}
 
-	for _, flagName := range index.flagNames {
+	for _, flagName := range flagNames {
 		if !cmd.IsSet(flagName) {
 			continue
 		}
 
-		field, ok, err := index.resolveField(scope, flagName)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
-		}
-
+		field := fields[flagName]
 		setCLIFlagValue(cmd, config, field.configPath, flagName, field.fieldType)
 	}
 

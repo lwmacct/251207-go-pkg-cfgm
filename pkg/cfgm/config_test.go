@@ -403,8 +403,8 @@ func TestLoadWithCommand(t *testing.T) {
 	flags := []cli.Flag{
 		&cli.StringFlag{Name: "name", Value: defaultCfg.Name},
 		&cli.BoolFlag{Name: "debug", Value: defaultCfg.Debug},
-		&cli.StringFlag{Name: "addr", Value: defaultCfg.Server.Addr},
-		&cli.DurationFlag{Name: "timeout", Value: defaultCfg.Server.Timeout},
+		&cli.StringFlag{Name: "server.addr", Value: defaultCfg.Server.Addr},
+		&cli.DurationFlag{Name: "server.timeout", Value: defaultCfg.Server.Timeout},
 	}
 
 	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--name", "cli-app", "--debug"})
@@ -414,6 +414,65 @@ func TestLoadWithCommand(t *testing.T) {
 	a.True(cfg.Debug, "CLI flag should override")
 	a.Equal(":8080", cfg.Server.Addr, "unset flag keeps default")
 	a.Equal(30*time.Second, cfg.Server.Timeout, "unset flag keeps default")
+}
+
+func TestLoadWithCommand_NestedPathFlag(t *testing.T) {
+	const clientCommand = "client"
+
+	type ServerConfig struct {
+		AliveInterval time.Duration `json:"aliveInterval"`
+	}
+	type ClientConfig struct {
+		Server ServerConfig `json:"server"`
+	}
+	type Config struct {
+		Client ClientConfig `json:"client"`
+	}
+
+	defaultCfg := Config{Client: ClientConfig{Server: ServerConfig{AliveInterval: 30 * time.Second}}}
+	flags := []cli.Flag{
+		&cli.DurationFlag{Name: "server.aliveInterval", Value: defaultCfg.Client.Server.AliveInterval},
+	}
+
+	cfg := runNamedCLITest(
+		t,
+		clientCommand,
+		defaultCfg,
+		flags,
+		[]string{clientCommand, "--server.aliveInterval", "5s"},
+	)
+
+	assert.Equal(t, 5*time.Second, cfg.Client.Server.AliveInterval)
+}
+
+func TestLoadWithCommand_RejectsUnmappedFlag(t *testing.T) {
+	const clientCommand = "client"
+
+	type ServerConfig struct {
+		AliveInterval time.Duration `json:"aliveInterval"`
+	}
+	type ClientConfig struct {
+		Server ServerConfig `json:"server"`
+	}
+	type Config struct {
+		Client ClientConfig `json:"client"`
+	}
+
+	defaultCfg := Config{Client: ClientConfig{Server: ServerConfig{AliveInterval: 30 * time.Second}}}
+	cmd := &cli.Command{
+		Name: clientCommand,
+		Flags: []cli.Flag{
+			&cli.DurationFlag{Name: "aliveInterval"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			_, err := Load(defaultCfg, WithCommand(cmd))
+			return err
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{clientCommand})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CLI flag --aliveInterval has no matching config field")
 }
 
 func TestLoadWithCommand_NestedFlags(t *testing.T) {
@@ -481,7 +540,7 @@ func TestLoadWithCommand_SubCommands(t *testing.T) {
 	assert.Equal(t, 30, loadedCfg.Client.Timeout, "unset keeps default")
 }
 
-func TestLoadWithCommand_AmbiguousLeafFlag(t *testing.T) {
+func TestLoadWithCommand_FullPathDisambiguatesNestedFlags(t *testing.T) {
 	type EndpointConfig struct {
 		Addr string `json:"addr"`
 	}
@@ -498,18 +557,23 @@ func TestLoadWithCommand_AmbiguousLeafFlag(t *testing.T) {
 	cmd := &cli.Command{
 		Name: "test",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "addr"},
+			&cli.StringFlag{Name: "client.addr"},
+			&cli.StringFlag{Name: "server.addr"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			_, err := Load(defaultCfg, WithCommand(cmd))
+			cfg, err := Load(defaultCfg, WithCommand(cmd))
+			if err != nil {
+				return err
+			}
+			assert.Equal(t, ":9090", cfg.Client.Addr)
+			assert.Equal(t, "server-default", cfg.Server.Addr)
 
-			return err
+			return nil
 		},
 	}
 
-	err := cmd.Run(context.Background(), []string{"test", "--addr", ":9090"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CLI flag --addr is ambiguous")
+	err := cmd.Run(context.Background(), []string{"test", "--client.addr", ":9090"})
+	require.NoError(t, err)
 }
 
 func TestLoadWithCommand_Priority(t *testing.T) {

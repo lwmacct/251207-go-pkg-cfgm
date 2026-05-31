@@ -86,12 +86,12 @@
 //
 // # CLI Flag 映射
 //
-// CLI flag 默认使用叶子字段名，并根据命令链路推导配置作用域：
+// CLI flag 默认使用配置路径，并移除与命令链匹配的作用域前缀：
 //   - `server` 命令下，`server.addr` → `--addr`
-//   - `client health` 命令下，`client.timeout` → `--timeout`
-//   - 无命令作用域时，顶层叶子优先；否则要求叶子名全局唯一
+//   - `client` 命令下，`client.server.addr` → `--server.addr`
+//   - 无命令作用域时，`server.addr` → `--server.addr`
 //
-// 若同名叶子字段无法唯一解析，Load / LoadCmd 会返回错误，而不是静默忽略。
+// 若同一命令下生成的 flag 名重复，Load / LoadCmd 会返回错误，而不是静默忽略。
 //
 // # 生成配置示例
 //

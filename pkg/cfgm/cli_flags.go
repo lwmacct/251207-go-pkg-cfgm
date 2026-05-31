@@ -11,31 +11,21 @@ import (
 
 type cliFieldMeta struct {
 	configPath string
-	parentPath string
-	flagName   string
 	fieldType  reflect.Type
 }
 
 type cliConfigIndex struct {
-	rootType     reflect.Type
-	fields       []cliFieldMeta
-	fieldsByFlag map[string][]cliFieldMeta
-	flagNames    []string
+	rootType reflect.Type
+	fields   []cliFieldMeta
 }
 
 func newCLIConfigIndex(typ reflect.Type) *cliConfigIndex {
 	rootType := normalizeStructType(typ)
 	index := &cliConfigIndex{
-		rootType:     rootType,
-		fields:       make([]cliFieldMeta, 0),
-		fieldsByFlag: make(map[string][]cliFieldMeta),
+		rootType: rootType,
+		fields:   make([]cliFieldMeta, 0),
 	}
 	index.collect(rootType, "")
-
-	for flagName := range index.fieldsByFlag {
-		index.flagNames = append(index.flagNames, flagName)
-	}
-	slices.Sort(index.flagNames)
 
 	return index
 }
@@ -59,36 +49,109 @@ func (i *cliConfigIndex) collect(typ reflect.Type, prefix string) {
 			continue
 		}
 
-		meta := cliFieldMeta{
+		i.fields = append(i.fields, cliFieldMeta{
 			configPath: fullPath,
-			parentPath: prefix,
-			flagName:   key,
 			fieldType:  field.Type,
-		}
-		i.fields = append(i.fields, meta)
-		i.fieldsByFlag[key] = append(i.fieldsByFlag[key], meta)
+		})
 	}
 }
 
-func inferCommandScope(cmd *cli.Command, rootType reflect.Type) string {
-	currentType := normalizeStructType(rootType)
+func (i *cliConfigIndex) commandScopes(cmd *cli.Command) []string {
+	currentType := i.rootType
 	if currentType.Kind() != reflect.Struct {
-		return ""
+		return nil
 	}
 
+	var scopes []string
 	scope := ""
 	lineage := cmd.Lineage()
 	for idx := len(lineage) - 1; idx >= 0; idx-- {
-		nextType, ok := findNestedStructType(currentType, lineage[idx].Name)
+		name := lineage[idx].Name
+		nextType, ok := findNestedStructType(currentType, name)
 		if !ok {
 			continue
 		}
 
-		scope = joinConfigPath(scope, lineage[idx].Name)
+		scope = joinConfigPath(scope, name)
+		scopes = append(scopes, scope)
 		currentType = nextType
 	}
 
-	return scope
+	return scopes
+}
+
+func (i *cliConfigIndex) commandFields(cmd *cli.Command) (map[string]cliFieldMeta, []string, error) {
+	scopes := i.commandScopes(cmd)
+	fields := make(map[string]cliFieldMeta)
+
+	for _, field := range i.fields {
+		flagName, ok := cliFlagName(field.configPath, scopes)
+		if !ok {
+			continue
+		}
+
+		if existing, exists := fields[flagName]; exists {
+			return nil, nil, fmt.Errorf(
+				"cfgm: CLI flag --%s is ambiguous: matches %s, %s",
+				flagName,
+				existing.configPath,
+				field.configPath,
+			)
+		}
+		fields[flagName] = field
+	}
+
+	flagNames := make([]string, 0, len(fields))
+	for flagName := range fields {
+		flagNames = append(flagNames, flagName)
+	}
+	slices.Sort(flagNames)
+
+	return fields, flagNames, nil
+}
+
+func validateCommandFlags(cmd *cli.Command, fields map[string]cliFieldMeta) error {
+	for _, command := range cmd.Lineage() {
+		for _, flag := range command.VisibleFlags() {
+			names := flag.Names()
+			if len(names) == 0 || isFrameworkFlag(flag) {
+				continue
+			}
+			if _, ok := fields[names[0]]; !ok {
+				return fmt.Errorf("cfgm: CLI flag --%s has no matching config field", names[0])
+			}
+		}
+	}
+
+	return nil
+}
+
+func isFrameworkFlag(flag cli.Flag) bool {
+	for _, name := range flag.Names() {
+		if name == "help" || name == "h" || name == "version" || name == "v" {
+			return true
+		}
+	}
+	return false
+}
+
+func cliFlagName(configPath string, scopes []string) (string, bool) {
+	if !strings.Contains(configPath, ".") {
+		return configPath, true
+	}
+
+	for _, v := range slices.Backward(scopes) {
+		scopePrefix := v + "."
+		if flagName, ok := strings.CutPrefix(configPath, scopePrefix); ok {
+			return flagName, true
+		}
+	}
+
+	if len(scopes) == 0 {
+		return configPath, true
+	}
+
+	return "", false
 }
 
 func findNestedStructType(typ reflect.Type, key string) (reflect.Type, bool) {
@@ -122,82 +185,4 @@ func joinConfigPath(prefix, key string) string {
 	}
 
 	return prefix + "." + key
-}
-
-func isPathWithinScope(path, scope string) bool {
-	return path == scope || strings.HasPrefix(path, scope+".")
-}
-
-func (i *cliConfigIndex) resolveField(scope, flagName string) (cliFieldMeta, bool, error) {
-	fields := i.fieldsByFlag[flagName]
-	if len(fields) == 0 {
-		return cliFieldMeta{}, false, nil
-	}
-
-	if scope != "" {
-		return resolveScopedField(scope, flagName, fields)
-	}
-
-	topLevel := make([]cliFieldMeta, 0, len(fields))
-	for _, field := range fields {
-		if field.parentPath == "" {
-			topLevel = append(topLevel, field)
-		}
-	}
-
-	if len(topLevel) == 1 {
-		return topLevel[0], true, nil
-	}
-	if len(topLevel) > 1 {
-		return cliFieldMeta{}, false, newCLIFlagAmbiguousError("", flagName, topLevel)
-	}
-	if len(fields) == 1 {
-		return fields[0], true, nil
-	}
-
-	return cliFieldMeta{}, false, newCLIFlagAmbiguousError("", flagName, fields)
-}
-
-func resolveScopedField(scope, flagName string, fields []cliFieldMeta) (cliFieldMeta, bool, error) {
-	direct := make([]cliFieldMeta, 0, len(fields))
-	descendants := make([]cliFieldMeta, 0, len(fields))
-	for _, field := range fields {
-		if !isPathWithinScope(field.configPath, scope) {
-			continue
-		}
-
-		descendants = append(descendants, field)
-		if field.parentPath == scope {
-			direct = append(direct, field)
-		}
-	}
-
-	if len(direct) == 1 {
-		return direct[0], true, nil
-	}
-	if len(direct) > 1 {
-		return cliFieldMeta{}, false, newCLIFlagAmbiguousError(scope, flagName, direct)
-	}
-	if len(descendants) == 1 {
-		return descendants[0], true, nil
-	}
-	if len(descendants) > 1 {
-		return cliFieldMeta{}, false, newCLIFlagAmbiguousError(scope, flagName, descendants)
-	}
-
-	return cliFieldMeta{}, false, fmt.Errorf("cfgm: CLI flag --%s has no matching config field in scope %q", flagName, scope)
-}
-
-func newCLIFlagAmbiguousError(scope, flagName string, fields []cliFieldMeta) error {
-	paths := make([]string, 0, len(fields))
-	for _, field := range fields {
-		paths = append(paths, field.configPath)
-	}
-	slices.Sort(paths)
-
-	if scope == "" {
-		return fmt.Errorf("cfgm: CLI flag --%s is ambiguous: matches %s", flagName, strings.Join(paths, ", "))
-	}
-
-	return fmt.Errorf("cfgm: CLI flag --%s is ambiguous in scope %q: matches %s", flagName, scope, strings.Join(paths, ", "))
 }
