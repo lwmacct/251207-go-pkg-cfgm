@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -92,6 +93,10 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 	node := &yamlv3.Node{Kind: yamlv3.MappingNode}
 
 	for field := range typ.Fields() {
+		if field.PkgPath != "" {
+			continue
+		}
+
 		fieldVal := val.FieldByIndex(field.Index)
 
 		key := configTagName(field)
@@ -113,10 +118,10 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 		switch {
 		case isStruct:
 			valNode = structToNode(fieldVal, field.Type)
-			keyNode.HeadComment = "\n" + comment // 复杂类型注释放在 key 上方，前面加空行
+			setComplexFieldComment(keyNode, comment)
 		case isSlice:
 			valNode = valueToNode(fieldVal, field.Type)
-			keyNode.HeadComment = "\n" + comment // 复杂类型注释放在 key 上方，前面加空行
+			setComplexFieldComment(keyNode, comment)
 		default:
 			valNode = valueToNode(fieldVal, field.Type)
 			// 多行注释放在 key 上方（HeadComment），单行注释放在行尾（LineComment）
@@ -127,6 +132,14 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 	}
 
 	return node
+}
+
+// setComplexFieldComment 设置复杂字段的注释。
+// 复杂类型注释放在 key 上方，前面加空行。
+func setComplexFieldComment(keyNode *yamlv3.Node, comment string) {
+	if comment != "" {
+		keyNode.HeadComment = "\n" + comment
+	}
 }
 
 // setSimpleFieldComment 设置简单字段的注释。
@@ -235,12 +248,23 @@ func valueToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 		if val.Len() == 0 {
 			node.Style = yamlv3.FlowStyle // {} 形式
 		} else {
+			entries := make([]mapNodeEntry, 0, val.Len())
 			iter := val.MapRange()
 			for iter.Next() {
 				k, v := iter.Key(), iter.Value()
+				entries = append(entries, mapNodeEntry{
+					key:   fmt.Sprintf("%v", k.Interface()),
+					value: v,
+				})
+			}
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].key < entries[j].key
+			})
+
+			for _, entry := range entries {
 				node.Content = append(node.Content,
-					&yamlv3.Node{Kind: yamlv3.ScalarNode, Value: fmt.Sprintf("%v", k.Interface())},
-					valueToNode(v, v.Type()),
+					&yamlv3.Node{Kind: yamlv3.ScalarNode, Value: entry.key},
+					valueToNode(entry.value, entry.value.Type()),
 				)
 			}
 		}
@@ -253,6 +277,11 @@ func valueToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 			Value: fmt.Sprintf("%v", val.Interface()),
 		}
 	}
+}
+
+type mapNodeEntry struct {
+	key   string
+	value reflect.Value
 }
 
 // ConfigTestHelper 配置测试辅助工具。

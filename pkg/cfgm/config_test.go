@@ -1432,6 +1432,68 @@ func TestExampleYAML_BlankLinesDoNotKeepIndentation(t *testing.T) {
 	assert.Contains(t, yaml, "host: \"localhost\" # 数据库主机\n\n  # 端口号\n  # 默认: 5432\n  port: 5432\n")
 }
 
+func TestExampleYAML_SkipsUnexportedTaggedFields(t *testing.T) {
+	typ := reflect.StructOf([]reflect.StructField{
+		{
+			Name: "Name",
+			Type: reflect.TypeFor[string](),
+			Tag:  `json:"name" desc:"应用名称"`,
+		},
+		{
+			Name:    "secret",
+			PkgPath: "github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm",
+			Type:    reflect.TypeFor[string](),
+			Tag:     `json:"secret" desc:"内部字段"`,
+		},
+	})
+	val := reflect.New(typ).Elem()
+	val.FieldByName("Name").SetString("test")
+
+	yaml := string(ExampleYAML(val.Interface()))
+
+	assert.Contains(t, yaml, `name: "test"`)
+	assert.NotContains(t, yaml, "secret:")
+}
+
+func TestExampleYAML_EmptyComplexDescDoesNotAddBlankLine(t *testing.T) {
+	type Server struct {
+		Host string `json:"host" desc:"服务器地址"`
+	}
+	type Config struct {
+		Server Server `json:"server"`
+	}
+
+	yaml := string(ExampleYAML(Config{
+		Server: Server{Host: "localhost"},
+	}))
+
+	assert.Contains(t, yaml, "# 配置示例文件, 复制此文件为 config.yaml 并根据需要修改\nserver:\n")
+	assert.NotContains(t, yaml, "# 配置示例文件, 复制此文件为 config.yaml 并根据需要修改\n\nserver:\n")
+}
+
+func TestExampleYAML_MapKeysAreSorted(t *testing.T) {
+	cfg := struct {
+		Labels map[string]string `json:"labels" desc:"标签"`
+	}{
+		Labels: map[string]string{
+			"zeta":  "last",
+			"alpha": "first",
+			"mid":   "middle",
+		},
+	}
+
+	yaml := string(ExampleYAML(cfg))
+
+	alpha := strings.Index(yaml, "alpha:")
+	mid := strings.Index(yaml, "mid:")
+	zeta := strings.Index(yaml, "zeta:")
+	require.NotEqual(t, -1, alpha)
+	require.NotEqual(t, -1, mid)
+	require.NotEqual(t, -1, zeta)
+	assert.Less(t, alpha, mid)
+	assert.Less(t, mid, zeta)
+}
+
 // =============================================================================
 // setCLIFlagValue 和 setSliceFlagValue 边界测试 (内部函数)
 // =============================================================================
