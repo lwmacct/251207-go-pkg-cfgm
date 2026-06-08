@@ -15,16 +15,16 @@
 
 - [特性](#特性) `:31+10`
 - [安装](#安装) `:41+6`
-- [快速开始](#快速开始) `:47+167`
+- [快速开始](#快速开始) `:47+195`
   - [1. 定义配置结构体](#1-定义配置结构体) `:49+36`
-  - [2. 加载配置](#2-加载配置) `:85+27`
-  - [3. 环境变量](#3-环境变量) `:112+24`
-  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:136+78`
-- [模板语法](#模板语法) `:214+44`
-  - [基本语法](#基本语法) `:222+16`
-  - [语义说明](#语义说明) `:238+7`
-  - [使用示例](#使用示例) `:245+13`
-- [License](#license) `:258+3`
+  - [2. 加载配置](#2-加载配置) `:85+55`
+  - [3. 环境变量](#3-环境变量) `:140+24`
+  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:164+78`
+- [模板语法](#模板语法) `:242+44`
+  - [基本语法](#基本语法) `:250+16`
+  - [语义说明](#语义说明) `:266+7`
+  - [使用示例](#使用示例) `:273+13`
+- [License](#license) `:286+3`
 
 <!--TOC-->
 
@@ -107,7 +107,35 @@ cfg, err := cfgm.Load(DefaultConfig(),
     cfgm.WithEnvPrefix("MYAPP_"),
     cfgm.WithCommand(cmd),
 )
+
+// CLI 场景推荐使用 LoadCmd，并在根命令挂载 cfgm.ConfigFlag()
+app := &cli.Command{
+    Name:  "myapp",
+    Flags: []cli.Flag{cfgm.ConfigFlag()},
+    Commands: []*cli.Command{
+        {
+            Name: "server",
+            Action: func(ctx context.Context, cmd *cli.Command) error {
+                cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp")
+                if err != nil {
+                    return err
+                }
+                _ = cfg
+                return nil
+            },
+        },
+    },
+}
 ```
+
+指定配置文件路径：
+
+```bash
+myapp --config ./config.yaml server
+myapp -c ./config.yaml server
+```
+
+`--config` 指定的路径会作为唯一配置文件搜索路径；未指定时使用 `WithAppName` / 默认路径规则。
 
 ### 3. 环境变量
 

@@ -571,6 +571,39 @@ func TestLoadWithCommand_SubCommands(t *testing.T) {
 	assert.Equal(t, 30, loadedCfg.Client.Timeout, "unset keeps default")
 }
 
+func TestLoadCmdUsesConfigFlagFromCommandLineage(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tmpFile := writeTempConfig(t, `name: "from-config-flag"`)
+	defaultCfg := Config{Name: "default"}
+	var loadedCfg *Config
+
+	subCmd := &cli.Command{
+		Name: "serve",
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := LoadCmd(cmd, defaultCfg, "")
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+
+			return nil
+		},
+	}
+	rootCmd := &cli.Command{
+		Name:     "app",
+		Flags:    []cli.Flag{ConfigFlag()},
+		Commands: []*cli.Command{subCmd},
+	}
+
+	err := rootCmd.Run(context.Background(), []string{"app", "--config", tmpFile, "serve"})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+	assert.Equal(t, "from-config-flag", loadedCfg.Name)
+}
+
 func TestLoadWithCommand_FullPathDisambiguatesNestedFlags(t *testing.T) {
 	type EndpointConfig struct {
 		Addr string `json:"addr"`

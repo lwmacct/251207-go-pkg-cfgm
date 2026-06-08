@@ -2,6 +2,8 @@ package cfgm
 
 import "github.com/urfave/cli/v3"
 
+const configFlagName = "config"
+
 // options 配置加载选项。
 type options struct {
 	appName             string // 应用名称，用于生成默认配置路径
@@ -17,6 +19,19 @@ type options struct {
 
 // Option 配置加载选项函数。
 type Option func(*options)
+
+// ConfigFlag 返回 cfgm 识别的配置文件路径 CLI flag。
+//
+// 将该 flag 挂到根命令或子命令后，[LoadCmd] / [MustLoadCmd] 会自动读取
+// --config 指定的路径，并使用它作为唯一配置文件搜索路径。
+// 该 flag 不会映射到配置结构体字段。
+func ConfigFlag() cli.Flag {
+	return &cli.StringFlag{
+		Name:    configFlagName,
+		Aliases: []string{"c"},
+		Usage:   "配置文件路径",
+	}
+}
 
 // WithCommand 绑定 CLI 命令，读取显式设置的 flags 以覆盖配置（最高优先级）。
 func WithCommand(cmd *cli.Command) Option {

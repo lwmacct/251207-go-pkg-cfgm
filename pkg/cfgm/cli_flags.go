@@ -125,7 +125,8 @@ func validateCommandFlags(cmd *cli.Command, fields map[string]cliFieldMeta) erro
 
 func isFrameworkFlag(flag cli.Flag) bool {
 	for _, name := range flag.Names() {
-		if name == "help" || name == "h" || name == "version" || name == "v" {
+		if name == "help" || name == "h" || name == "version" || name == "v" ||
+			name == configFlagName || name == "c" {
 			return true
 		}
 	}

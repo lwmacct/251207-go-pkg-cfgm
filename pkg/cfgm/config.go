@@ -213,12 +213,15 @@ func expandTemplateValues(value any) (any, error) {
 // LoadCmd 是 [Load] 的便捷版本，适用于 CLI 场景。
 //
 // 它会注入 [WithCommand]，appName 非空时额外注入 [WithAppName]。
+// 如果命令链上存在 [ConfigFlag] 且用户显式设置了 --config / -c，
+// 则会额外注入 [WithConfigPaths] 并使用该路径作为唯一配置文件搜索路径。
 //
 // 等价于：
 //
 //	cfgm.Load(defaultConfig,
 //	    cfgm.WithCommand(cmd),
 //	    cfgm.WithAppName(appName),  // 如果 appName 非空
+//	    cfgm.WithConfigPaths(path), // 如果显式设置了 --config / -c
 //	    opts...,
 //	)
 //
@@ -231,8 +234,13 @@ func expandTemplateValues(value any) (any, error) {
 //
 //	// 不带应用名
 //	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "")
+//
+//	// 支持 --config / -c
+//	app := &cli.Command{
+//	    Flags: []cli.Flag{cfgm.ConfigFlag()},
+//	}
 func LoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...Option) (*T, error) {
-	baseOpts := []Option{WithCommand(cmd)}
+	baseOpts := cmdOptions(cmd)
 	if appName != "" {
 		baseOpts = append(baseOpts, WithAppName(appName))
 	}
@@ -264,7 +272,7 @@ func MustLoad[T any](defaultConfig T, opts ...Option) *T {
 //	    cfgm.WithEnvPrefix("MYAPP_"),
 //	)
 func MustLoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...Option) *T {
-	baseOpts := []Option{WithCommand(cmd)}
+	baseOpts := cmdOptions(cmd)
 	if appName != "" {
 		baseOpts = append(baseOpts, WithAppName(appName))
 	}
@@ -274,6 +282,29 @@ func MustLoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts 
 	}
 
 	return cfg
+}
+
+func cmdOptions(cmd *cli.Command) []Option {
+	opts := []Option{WithCommand(cmd)}
+	if configPath := commandConfigPath(cmd); configPath != "" {
+		opts = append(opts, WithConfigPaths(configPath))
+	}
+
+	return opts
+}
+
+func commandConfigPath(cmd *cli.Command) string {
+	if cmd == nil {
+		return ""
+	}
+
+	for _, command := range cmd.Lineage() {
+		if command.IsSet(configFlagName) {
+			return command.String(configFlagName)
+		}
+	}
+
+	return ""
 }
 
 // collectConfigKeys 递归收集配置结构体的 key 列表。

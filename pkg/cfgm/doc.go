@@ -22,6 +22,11 @@
 //
 // 推荐使用 LoadCmd：
 //
+//	app := &cli.Command{
+//	    Name:  "myapp",
+//	    Flags: []cli.Flag{cfgm.ConfigFlag()}, // 支持 --config / -c
+//	}
+//
 //	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp",
 //	    cfgm.WithEnvPrefix("MYAPP_"), // 可选；不传时默认使用 APP_
 //	)
@@ -52,6 +57,18 @@
 //	    cfgm.WithAppName("myapp"),          // 仍可用于其他用途
 //	    cfgm.WithConfigPaths("custom.yaml"), // 覆盖默认路径
 //	)
+//
+// CLI 场景可将 [ConfigFlag] 挂到根命令或子命令：
+//
+//	cmd := &cli.Command{
+//	    Flags: []cli.Flag{cfgm.ConfigFlag()},
+//	}
+//
+// [LoadCmd] / [MustLoadCmd] 会自动读取命令链上的 --config / -c：
+//
+//	myapp --config ./config.yaml server
+//
+// 指定后，该路径会作为唯一配置文件搜索路径；未指定时使用 [WithAppName] / 默认路径规则。
 //
 // # 环境变量(前缀)
 //
@@ -90,6 +107,7 @@
 //   - `server` 命令下，`server.addr` → `--addr`
 //   - `client` 命令下，`client.server.addr` → `--server.addr`
 //   - 无命令作用域时，`server.addr` → `--server.addr`
+//   - 显式完整路径始终可用，如 `server` 命令下仍可声明 `--redis.url`
 //
 // 若同一命令下生成的 flag 名重复，Load / LoadCmd 会返回错误，而不是静默忽略。
 //
