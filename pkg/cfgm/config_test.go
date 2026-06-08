@@ -527,6 +527,41 @@ func TestLoadWithCommand_FullPathFlagOnScopedCommand(t *testing.T) {
 	assert.Equal(t, "redis://cli:6379/0", cfg.Redis.URL)
 }
 
+func TestLoadWithCommand_ScopedFlagWinsOverRootFullPath(t *testing.T) {
+	type ClientServerConfig struct {
+		Hostkey string `json:"hostkey"`
+	}
+	type ClientConfig struct {
+		Server ClientServerConfig `json:"server"`
+	}
+	type ServerConfig struct {
+		Hostkey string `json:"hostkey"`
+	}
+	type Config struct {
+		Client ClientConfig `json:"client"`
+		Server ServerConfig `json:"server"`
+	}
+
+	defaultCfg := Config{
+		Client: ClientConfig{Server: ClientServerConfig{Hostkey: "client-default"}},
+		Server: ServerConfig{Hostkey: "server-default"},
+	}
+	flags := []cli.Flag{
+		&cli.StringFlag{Name: "server.hostkey", Value: defaultCfg.Client.Server.Hostkey},
+	}
+
+	cfg := runNamedCLITest(
+		t,
+		"client",
+		defaultCfg,
+		flags,
+		[]string{"client", "--server.hostkey", "client-cli"},
+	)
+
+	assert.Equal(t, "client-cli", cfg.Client.Server.Hostkey)
+	assert.Equal(t, "server-default", cfg.Server.Hostkey)
+}
+
 func TestLoadWithCommand_SubCommands(t *testing.T) {
 	type ClientConfig struct {
 		URL     string `json:"url"`

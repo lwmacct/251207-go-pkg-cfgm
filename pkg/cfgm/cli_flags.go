@@ -15,6 +15,13 @@ type cliFieldMeta struct {
 	fieldType  reflect.Type
 }
 
+type cliFlagCandidate struct {
+	name     string
+	scoped   bool
+	field    cliFieldMeta
+	priority int
+}
+
 type cliConfigIndex struct {
 	rootType reflect.Type
 	fields   []cliFieldMeta
@@ -84,10 +91,21 @@ func (i *cliConfigIndex) commandScopes(cmd *cli.Command) []string {
 func (i *cliConfigIndex) commandFields(cmd *cli.Command) (map[string]cliFieldMeta, []string, error) {
 	scopes := i.commandScopes(cmd)
 	fields := make(map[string]cliFieldMeta)
+	priorities := make(map[string]int)
 
 	for _, field := range i.fields {
-		for _, flagName := range cliFlagNames(field.configPath, scopes) {
+		for _, candidate := range cliFlagCandidates(field, scopes) {
+			flagName := candidate.name
+			if existingPriority, exists := priorities[flagName]; exists && existingPriority > candidate.priority {
+				continue
+			}
 			if existing, exists := fields[flagName]; exists {
+				if priorities[flagName] < candidate.priority {
+					fields[flagName] = field
+					priorities[flagName] = candidate.priority
+
+					continue
+				}
 				return nil, nil, fmt.Errorf(
 					"cfgm: CLI flag --%s is ambiguous: matches %s, %s",
 					flagName,
@@ -96,6 +114,7 @@ func (i *cliConfigIndex) commandFields(cmd *cli.Command) (map[string]cliFieldMet
 				)
 			}
 			fields[flagName] = field
+			priorities[flagName] = candidate.priority
 		}
 	}
 
@@ -254,18 +273,40 @@ func isFrameworkFlag(flag cli.Flag) bool {
 }
 
 func cliFlagNames(configPath string, scopes []string) []string {
-	names := []string{configPath}
+	field := cliFieldMeta{configPath: configPath}
+	candidates := cliFlagCandidates(field, scopes)
+	names := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		names = append(names, candidate.name)
+	}
+
+	return names
+}
+
+func cliFlagCandidates(field cliFieldMeta, scopes []string) []cliFlagCandidate {
+	candidates := []cliFlagCandidate{
+		{
+			name:     field.configPath,
+			field:    field,
+			priority: 0,
+		},
+	}
 
 	for _, v := range slices.Backward(scopes) {
 		scopePrefix := v + "."
-		if flagName, ok := strings.CutPrefix(configPath, scopePrefix); ok {
-			names = append(names, flagName)
+		if flagName, ok := strings.CutPrefix(field.configPath, scopePrefix); ok {
+			candidates = append(candidates, cliFlagCandidate{
+				name:     flagName,
+				scoped:   true,
+				field:    field,
+				priority: 1,
+			})
 
 			break
 		}
 	}
 
-	return names
+	return candidates
 }
 
 func findNestedStructType(typ reflect.Type, key string) (reflect.Type, bool) {
