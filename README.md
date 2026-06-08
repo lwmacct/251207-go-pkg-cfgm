@@ -15,16 +15,16 @@
 
 - [特性](#特性) `:31+10`
 - [安装](#安装) `:41+6`
-- [快速开始](#快速开始) `:47+152`
+- [快速开始](#快速开始) `:47+167`
   - [1. 定义配置结构体](#1-定义配置结构体) `:49+36`
   - [2. 加载配置](#2-加载配置) `:85+27`
   - [3. 环境变量](#3-环境变量) `:112+24`
-  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:136+63`
-- [模板语法](#模板语法) `:199+44`
-  - [基本语法](#基本语法) `:207+16`
-  - [语义说明](#语义说明) `:223+7`
-  - [使用示例](#使用示例) `:230+13`
-- [License](#license) `:243+3`
+  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:136+78`
+- [模板语法](#模板语法) `:214+44`
+  - [基本语法](#基本语法) `:222+16`
+  - [语义说明](#语义说明) `:238+7`
+  - [使用示例](#使用示例) `:245+13`
+- [License](#license) `:258+3`
 
 <!--TOC-->
 
@@ -135,12 +135,15 @@ cfg, err := cfgm.Load(DefaultConfig(),
 
 ### 4. 测试驱动的配置管理
 
-本库提供 `ConfigTestHelper` 测试辅助工具，通过单元测试实现配置示例生成和配置校验。
+本库提供 `ConfigFiles` 测试辅助工具，通过单元测试维护两类文件：
+
+- `config/config.example.yaml`：示例配置文件，由测试生成，适合提交到仓库
+- `config/config.yaml`：本地运行配置文件，由用户显式初始化或复制示例文件得到，通常不提交
 
 创建测试文件 `internal/config/config_test.go`：
 
 ```go
-package cfgm
+package config
 
 import (
     "testing"
@@ -148,29 +151,31 @@ import (
 )
 
 // 定义一次，复用多处
-var helper = cfgm.ConfigTestHelper[Config]{
-    ExamplePath: "config/config.example.yaml",
-    ConfigPath:  "config/config.yaml",
+var files = cfgm.ConfigFiles[Config]{
+    Defaults:    DefaultConfig,
+    ExampleFile: "config/config.example.yaml",
+    RuntimeFile: "config/config.yaml",
 }
 
-func TestWriteExample(t *testing.T) { helper.WriteExampleFile(t, DefaultConfig()) }
-func TestConfigKeysValid(t *testing.T) { helper.ValidateKeys(t) }
+func TestWriteConfigExample(t *testing.T) { files.WriteExample(t) }
+func TestRuntimeConfigKeysValid(t *testing.T) { files.ValidateRuntimeConfig(t) }
 ```
 
 路径为相对路径，相对于 `go.mod` 所在目录。
 
-#### 生成配置示例（TestWriteExample）
+#### 生成配置示例（TestWriteConfigExample）
 
-根据 `DefaultConfig()` 结构体自动生成带注释的示例文件：
+根据 `DefaultConfig()` 结构体自动生成带注释的示例文件，输出到 `ExampleFile`：
 
 ```bash
-go test -v -run TestWriteExample ./internal/config/...
+go test -v -run TestWriteConfigExample ./internal/config/...
 ```
 
 生成的示例文件：
 
 ```yaml
-# 配置示例文件, 复制此文件为 config.yaml 并根据需要修改
+# 默认配置示例文件, 此文件由单元测试生成, 请勿直接修改
+# 复制此文件为 config.yaml 并根据需要修改
 
 # 服务端配置
 server:
@@ -180,12 +185,12 @@ server:
 
 **工作原理**：通过反射读取结构体的 `json` 和 `desc` tag，自动生成完整的 YAML 示例。
 
-#### 校验配置文件（TestConfigKeysValid）
+#### 校验运行配置（TestRuntimeConfigKeysValid）
 
-验证配置文件中的所有配置项都在示例文件中定义：
+验证 `RuntimeFile` 中的所有配置项都在 `ExampleFile` 中定义：
 
 ```bash
-go test -v -run TestConfigKeysValid ./internal/config/...
+go test -v -run TestRuntimeConfigKeysValid ./internal/config/...
 ```
 
 **用途**：
@@ -194,7 +199,17 @@ go test -v -run TestConfigKeysValid ./internal/config/...
 - 检测已废弃的配置项
 - CI 集成，确保配置文件与代码同步
 
-如果存在无效配置项，测试将失败并列出所有问题项。如果配置文件不存在，测试会自动跳过。
+如果存在无效配置项，测试将失败并列出所有问题项。如果运行配置文件不存在，测试会自动跳过。
+
+#### 初始化本地运行配置
+
+`ConfigFiles.WriteExample` 只生成示例文件，不会写入或覆盖 `config/config.yaml`。如需生成本地运行配置，可在应用初始化命令中显式调用：
+
+```go
+err := cfgm.InitConfigFile(DefaultConfig(), "config/config.yaml")
+```
+
+如果目标文件已存在，`InitConfigFile` 会返回错误并拒绝覆盖。
 
 ## 模板语法
 

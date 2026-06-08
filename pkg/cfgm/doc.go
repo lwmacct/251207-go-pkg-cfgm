@@ -107,13 +107,18 @@
 //
 // # 测试辅助
 //
-// [ConfigTestHelper] 可用于校验配置项与示例文件的一致性：
+// [ConfigFiles] 可用于在测试中生成示例文件并校验运行配置：
 //
-//	var helper = cfgm.ConfigTestHelper[Config]{
-//	    ExamplePath: "config/config.example.yaml",
-//	    ConfigPath:  "config/config.yaml",
+//	var files = cfgm.ConfigFiles[Config]{
+//	    Defaults:    DefaultConfig,
+//	    ExampleFile: "config/config.example.yaml",
+//	    RuntimeFile: "config/config.yaml",
 //	}
 //
-//	func TestWriteExample(t *testing.T) { helper.WriteExampleFile(t, DefaultConfig()) }
-//	func TestConfigKeysValid(t *testing.T) { helper.ValidateKeys(t) }
+//	func TestWriteConfigExample(t *testing.T) { files.WriteExample(t) }
+//	func TestRuntimeConfigKeysValid(t *testing.T) { files.ValidateRuntimeConfig(t) }
+//
+// 使用 [InitConfigFile] 可显式初始化本地运行配置文件：
+//
+//	err := cfgm.InitConfigFile(DefaultConfig(), "config/config.yaml")
 package cfgm

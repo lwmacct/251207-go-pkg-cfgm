@@ -670,7 +670,7 @@ func TestExampleYAML(t *testing.T) {
 				Retries uint    `json:"retries" desc:"重试次数"`
 			}{Name: "test-app", Debug: true, Port: 8080, Rate: 1.5, Retries: 3},
 			contains: []string{
-				"# 配置示例文件",
+				"# 默认配置示例文件",
 				`name: "test-app"`, "# 应用名称",
 				"debug: true", "# 调试模式",
 				"port: 8080",
@@ -741,6 +741,65 @@ func TestExampleYAML(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInitConfigFileWritesRuntimeConfig(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+		Port int    `json:"port"`
+	}
+
+	configPath := filepath.Join(t.TempDir(), "nested", "config.yaml")
+	err := InitConfigFile(Config{Name: "app", Port: 8080}, configPath)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(configPath) //nolint:gosec // test reads its own temp file
+	require.NoError(t, err)
+	yaml := string(content)
+
+	assert.Contains(t, yaml, `name: app`)
+	assert.Contains(t, yaml, `port: 8080`)
+	assert.NotContains(t, yaml, "默认配置示例文件")
+}
+
+func TestInitConfigFileRefusesOverwrite(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("name: existing\n"), 0600))
+
+	err := InitConfigFile(Config{Name: "new"}, configPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+
+	content, readErr := os.ReadFile(configPath) //nolint:gosec // test reads its own temp file
+	require.NoError(t, readErr)
+	assert.Equal(t, "name: existing\n", string(content))
+}
+
+func TestConfigFilesWriteExample(t *testing.T) {
+	type Config struct {
+		Name string `json:"name" desc:"应用名称"`
+	}
+
+	examplePath := filepath.Join(t.TempDir(), "config.example.yaml")
+	files := ConfigFiles[Config]{
+		Defaults:    func() Config { return Config{Name: "example"} },
+		ExampleFile: examplePath,
+		RuntimeFile: filepath.Join(t.TempDir(), "config.yaml"),
+	}
+
+	files.WriteExample(t)
+
+	content, err := os.ReadFile(examplePath) //nolint:gosec // test reads its own temp file
+	require.NoError(t, err)
+	yaml := string(content)
+
+	assert.Contains(t, yaml, "默认配置示例文件")
+	assert.Contains(t, yaml, `name: "example"`)
+	assert.Contains(t, yaml, "# 应用名称")
 }
 
 // =============================================================================
@@ -1467,8 +1526,8 @@ func TestExampleYAML_EmptyComplexDescDoesNotAddBlankLine(t *testing.T) {
 		Server: Server{Host: "localhost"},
 	}))
 
-	assert.Contains(t, yaml, "# 配置示例文件, 复制此文件为 config.yaml 并根据需要修改\nserver:\n")
-	assert.NotContains(t, yaml, "# 配置示例文件, 复制此文件为 config.yaml 并根据需要修改\n\nserver:\n")
+	assert.Contains(t, yaml, "# 复制此文件为 config.yaml 并根据需要修改\nserver:\n")
+	assert.NotContains(t, yaml, "# 复制此文件为 config.yaml 并根据需要修改\n\nserver:\n")
 }
 
 func TestExampleYAML_MapKeysAreSorted(t *testing.T) {

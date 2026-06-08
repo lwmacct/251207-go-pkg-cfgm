@@ -54,7 +54,8 @@ func Example_exampleYAML() {
 	fmt.Println(string(yaml))
 
 	// Output:
-	// # 配置示例文件, 复制此文件为 config.yaml 并根据需要修改
+	// # 默认配置示例文件, 此文件由单元测试生成, 请勿直接修改
+	// # 复制此文件为 config.yaml 并根据需要修改
 	// name: "example-app" # 应用名称
 	// debug: false # 是否启用调试模式
 	// timeout: 30s # 超时时间

@@ -6,10 +6,11 @@ import (
 	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm"
 )
 
-var helper = cfgm.ConfigTestHelper[Config]{
-	ExamplePath: "config/config.example.yaml",
-	ConfigPath:  "config/config.yaml",
+var files = cfgm.ConfigFiles[Config]{
+	Defaults:    DefaultConfig,
+	ExampleFile: "config/config.example.yaml",
+	RuntimeFile: "config/config.yaml",
 }
 
-func TestWriteExample(t *testing.T)    { helper.WriteExampleFile(t, DefaultConfig()) }
-func TestConfigKeysValid(t *testing.T) { helper.ValidateKeys(t) }
+func TestWriteConfigExample(t *testing.T)     { files.WriteExample(t) }
+func TestRuntimeConfigKeysValid(t *testing.T) { files.ValidateRuntimeConfig(t) }

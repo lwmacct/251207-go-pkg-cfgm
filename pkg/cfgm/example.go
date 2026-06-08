@@ -28,7 +28,7 @@ import (
 //	os.WriteFile("config/config.example.yaml", yaml, 0644)
 func ExampleYAML[T any](cfg T) []byte {
 	node := structToNode(reflect.ValueOf(cfg), reflect.TypeOf(cfg))
-	node.HeadComment = "配置示例文件, 复制此文件为 config.yaml 并根据需要修改"
+	node.HeadComment = "默认配置示例文件, 此文件由单元测试生成, 请勿直接修改\n复制此文件为 config.yaml 并根据需要修改"
 
 	var buf bytes.Buffer
 	enc := yamlv3.NewEncoder(&buf)
@@ -77,6 +77,51 @@ func MarshalJSON[T any](cfg T) []byte {
 	_ = enc.Encode(cfg) //nolint:errchkjson // T is a config struct, safe to encode
 
 	return buf.Bytes()
+}
+
+// InitConfigFile 将默认配置写入运行配置文件。
+//
+// 该函数用于显式初始化本地配置文件（如 config/config.yaml）。如果目标文件已存在，
+// 函数会返回错误并拒绝覆盖。
+func InitConfigFile[T any](defaultConfig T, configPath string) error {
+	if configPath == "" {
+		return errors.New("config path is empty")
+	}
+
+	outputPath, err := resolveProjectPath(configPath, 1)
+	if err != nil {
+		return err
+	}
+
+	if _, statErr := os.Stat(outputPath); statErr == nil {
+		return fmt.Errorf("config file already exists: %s", outputPath)
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("stat config file %s: %w", outputPath, statErr)
+	}
+
+	outputDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outputDir, 0750); err != nil {
+		return fmt.Errorf("create config directory %s: %w", outputDir, err)
+	}
+
+	if err := os.WriteFile(outputPath, MarshalYAML(defaultConfig), 0600); err != nil {
+		return fmt.Errorf("write config file %s: %w", outputPath, err)
+	}
+
+	return nil
+}
+
+func resolveProjectPath(path string, callerSkip int) (string, error) {
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+
+	projectRoot, err := FindProjectRoot(callerSkip + 1)
+	if err != nil {
+		return "", fmt.Errorf("find project root: %w", err)
+	}
+
+	return filepath.Join(projectRoot, path), nil
 }
 
 // structToNode 将结构体转换为带注释的 yamlv3.Node。
@@ -284,34 +329,39 @@ type mapNodeEntry struct {
 	value reflect.Value
 }
 
-// ConfigTestHelper 配置测试辅助工具。
+// ConfigFiles 声明一组由默认配置驱动的配置文件。
 //
 // 使用示例：
 //
-//	var helper = cfgm.ConfigTestHelper[Config]{
-//	    ExamplePath: "config/config.example.yaml",
-//	    ConfigPath:  "config/config.yaml",
+//	var files = cfgm.ConfigFiles[Config]{
+//	    Defaults:    DefaultConfig,
+//	    ExampleFile: "config/config.example.yaml",
+//	    RuntimeFile: "config/config.yaml",
 //	}
 //
-//	func TestWriteExample(t *testing.T) { helper.WriteExampleFile(t, DefaultConfig()) }
-//	func TestConfigKeysValid(t *testing.T) { helper.ValidateKeys(t) }
-type ConfigTestHelper[T any] struct {
-	ExamplePath string // 示例文件相对路径（相对于 go.mod 所在目录）
-	ConfigPath  string // 配置文件相对路径（相对于 go.mod 所在目录）
+//	func TestWriteConfigExample(t *testing.T) { files.WriteExample(t) }
+//	func TestRuntimeConfigKeysValid(t *testing.T) { files.ValidateRuntimeConfig(t) }
+type ConfigFiles[T any] struct {
+	Defaults    func() T // 默认配置来源
+	ExampleFile string   // 示例文件相对路径（相对于 go.mod 所在目录）
+	RuntimeFile string   // 运行配置文件相对路径（相对于 go.mod 所在目录）
 }
 
-// WriteExampleFile 将示例配置写入文件。
-func (h *ConfigTestHelper[T]) WriteExampleFile(t *testing.T, defaultConfig T) {
+// WriteExample 将示例配置写入 ExampleFile。
+func (f ConfigFiles[T]) WriteExample(t *testing.T) {
 	t.Helper()
 
-	projectRoot, err := FindProjectRoot(1)
+	if f.Defaults == nil {
+		t.Fatal("Defaults is nil")
+	}
+
+	outputPath, err := resolveProjectPath(f.ExampleFile, 1)
 	if err != nil {
 		t.Fatalf("无法找到项目根目录: %v", err)
 	}
 
-	yamlBytes := ExampleYAML(defaultConfig)
+	yamlBytes := ExampleYAML(f.Defaults())
 
-	outputPath := filepath.Join(projectRoot, h.ExamplePath)
 	outputDir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(outputDir, 0750); err != nil {
 		t.Fatalf("创建目录失败: %v", err)
@@ -324,30 +374,31 @@ func (h *ConfigTestHelper[T]) WriteExampleFile(t *testing.T, defaultConfig T) {
 	t.Logf("✅ 已生成配置示例文件: %s", outputPath)
 }
 
-// ValidateKeys 校验配置文件中的键名是否都在示例文件中定义。
-func (h *ConfigTestHelper[T]) ValidateKeys(t *testing.T) {
+// ValidateRuntimeConfig 校验 RuntimeFile 中的键名是否都在 ExampleFile 中定义。
+func (f ConfigFiles[T]) ValidateRuntimeConfig(t *testing.T) {
 	t.Helper()
 
-	projectRoot, err := FindProjectRoot(1)
+	configPath, err := resolveProjectPath(f.RuntimeFile, 1)
+	if err != nil {
+		t.Fatalf("无法找到项目根目录: %v", err)
+	}
+	examplePath, err := resolveProjectPath(f.ExampleFile, 1)
 	if err != nil {
 		t.Fatalf("无法找到项目根目录: %v", err)
 	}
 
-	configPath := filepath.Join(projectRoot, h.ConfigPath)
-	examplePath := filepath.Join(projectRoot, h.ExamplePath)
-
 	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
-		t.Skipf("%s 不存在，跳过验证", h.ConfigPath)
+		t.Skipf("%s 不存在，跳过验证", f.RuntimeFile)
 	}
 
 	exampleKeys, err := loadConfigKeys(examplePath)
 	if err != nil {
-		t.Fatalf("无法加载 %s: %v", h.ExamplePath, err)
+		t.Fatalf("无法加载 %s: %v", f.ExampleFile, err)
 	}
 
 	configKeys, err := loadConfigKeys(configPath)
 	if err != nil {
-		t.Fatalf("无法加载 %s: %v", h.ConfigPath, err)
+		t.Fatalf("无法加载 %s: %v", f.RuntimeFile, err)
 	}
 
 	validKeyMap := make(map[string]bool, len(exampleKeys))
@@ -363,11 +414,14 @@ func (h *ConfigTestHelper[T]) ValidateKeys(t *testing.T) {
 	}
 
 	if len(invalidKeys) > 0 {
-		t.Errorf("%s 包含以下无效配置项:\n", h.ConfigPath)
-		for _, key := range invalidKeys {
-			t.Errorf("  - %s", key)
-		}
+		t.Fatalf(
+			"%s 包含以下无效配置项:\n  - %s",
+			f.RuntimeFile,
+			strings.Join(invalidKeys, "\n  - "),
+		)
 	}
+
+	t.Logf("✅ 配置文件 %s 的所有配置项都有效", f.RuntimeFile)
 }
 
 // FindProjectRoot 通过查找 go.mod 文件定位项目根目录。
