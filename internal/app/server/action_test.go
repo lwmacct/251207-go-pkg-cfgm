@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
-	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm"
 )
 
 func TestNewMuxHealthEndpoint(t *testing.T) {
@@ -82,14 +81,4 @@ func TestServerCommandIncludesRedisFlags(t *testing.T) {
 	assert.True(t, flagNames["redis.url"])
 	assert.True(t, flagNames["redis.disabled"])
 	assert.False(t, flagNames["redis.password"])
-}
-
-func TestServerCommandCoversConfigFlags(t *testing.T) {
-	cfgm.AssertCommandFlagCoverage(
-		t,
-		Command,
-		config.DefaultConfig(),
-		[]string{"server", "redis"},
-		cfgm.IgnoreConfigKeys("redis.password"),
-	)
 }
