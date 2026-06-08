@@ -866,6 +866,78 @@ func TestValidateCommandFlagCoverageAcceptsFullPathOnScopedCommand(t *testing.T)
 	require.NoError(t, err)
 }
 
+func TestSchemaCommandUsage(t *testing.T) {
+	type RedisConfig struct {
+		URL string `json:"url" desc:"Redis URL"`
+	}
+	type ClientConfig struct {
+		URL     string `json:"url" desc:"服务器地址"`
+		Timeout int    `json:"timeout" desc:"请求超时时间"`
+	}
+	type Config struct {
+		Client ClientConfig `json:"client" desc:"客户端配置"`
+		Redis  RedisConfig  `json:"redis" desc:"Redis 配置"`
+	}
+
+	usage := Schema(Config{}).Command("client")
+
+	assert.Equal(t, "服务器地址", usage.Usage("url"))
+	assert.Equal(t, "请求超时时间", usage.MustUsage("timeout"))
+	assert.Equal(t, "Redis URL", usage.Usage("redis.url"))
+	assert.Empty(t, usage.Usage("missing"))
+}
+
+func TestSchemaCommandUsageDeeperCommandScopeWins(t *testing.T) {
+	type ServiceConfig struct {
+		Port int `json:"port" desc:"服务端服务端口"`
+	}
+	type Config struct {
+		Server struct {
+			Service ServiceConfig `json:"service" desc:"服务配置"`
+		} `json:"server" desc:"服务端配置"`
+		Service ServiceConfig `json:"service" desc:"根服务配置"`
+	}
+
+	usage := Schema(Config{}).Command("server", "service")
+
+	assert.Equal(t, "服务端服务端口", usage.MustUsage("port"))
+	assert.Equal(t, "服务端服务端口", usage.MustUsage("service.port"))
+}
+
+func TestSchemaCommandUsageScopedFlagWinsOverRootFullPath(t *testing.T) {
+	type Config struct {
+		Client struct {
+			Server struct {
+				Hostkey string `json:"hostkey" desc:"客户端服务端主机公钥"`
+			} `json:"server" desc:"客户端服务端配置"`
+		} `json:"client" desc:"客户端配置"`
+		Server struct {
+			Hostkey string `json:"hostkey" desc:"服务端主机公钥"`
+		} `json:"server" desc:"服务端配置"`
+	}
+
+	usage := Schema(Config{}).Command("client")
+
+	assert.Equal(t, "客户端服务端主机公钥", usage.MustUsage("server.hostkey"))
+}
+
+func TestSchemaCommandUsagePanicsOnMissingFlag(t *testing.T) {
+	type Config struct {
+		Server struct {
+			Addr string `json:"addr" desc:"服务地址"`
+		} `json:"server" desc:"服务端配置"`
+	}
+
+	usage := Schema(Config{}).Command("server")
+
+	assert.PanicsWithError(
+		t,
+		"cfgm: CLI flag --missing has no matching config field",
+		func() { _ = usage.MustUsage("missing") },
+	)
+	assert.Empty(t, usage.Usage("missing"))
+}
+
 // =============================================================================
 // ExampleYAML 测试
 // =============================================================================

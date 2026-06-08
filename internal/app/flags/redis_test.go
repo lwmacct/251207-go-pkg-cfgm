@@ -24,10 +24,11 @@ func TestRedisFlagsMapToConfigOnClientAndServerCommands(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defaults := config.DefaultConfig()
+			usage := cfgm.Schema(defaults).Command(tt.name)
 			var loaded *config.Config
 			cmd := &cli.Command{
 				Name:  tt.name,
-				Flags: Redis(defaults.Redis),
+				Flags: Redis(defaults.Redis, usage),
 				Action: func(_ context.Context, cmd *cli.Command) error {
 					cfg, err := cfgm.LoadCmd(cmd, defaults, "", cfgm.WithConfigPaths("/nonexistent/config.yaml"))
 					if err != nil {

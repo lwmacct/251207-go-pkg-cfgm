@@ -13,6 +13,7 @@ import (
 type cliFieldMeta struct {
 	configPath string
 	fieldType  reflect.Type
+	desc       string
 }
 
 type cliFlagCandidate struct {
@@ -60,6 +61,7 @@ func (i *cliConfigIndex) collect(typ reflect.Type, prefix string) {
 		i.fields = append(i.fields, cliFieldMeta{
 			configPath: fullPath,
 			fieldType:  field.Type,
+			desc:       field.Tag.Get("desc"),
 		})
 	}
 }
@@ -90,6 +92,32 @@ func (i *cliConfigIndex) commandScopes(cmd *cli.Command) []string {
 
 func (i *cliConfigIndex) commandFields(cmd *cli.Command) (map[string]cliFieldMeta, []string, error) {
 	scopes := i.commandScopes(cmd)
+	return i.fieldsForScopes(scopes)
+}
+
+func (i *cliConfigIndex) commandScopesFromNames(names []string) []string {
+	currentType := i.rootType
+	if currentType.Kind() != reflect.Struct {
+		return nil
+	}
+
+	var scopes []string
+	scope := ""
+	for _, name := range names {
+		nextType, ok := findNestedStructType(currentType, name)
+		if !ok {
+			continue
+		}
+
+		scope = joinConfigPath(scope, name)
+		scopes = append(scopes, scope)
+		currentType = nextType
+	}
+
+	return scopes
+}
+
+func (i *cliConfigIndex) fieldsForScopes(scopes []string) (map[string]cliFieldMeta, []string, error) {
 	fields := make(map[string]cliFieldMeta)
 	priorities := make(map[string]int)
 

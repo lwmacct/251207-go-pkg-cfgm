@@ -113,6 +113,17 @@
 // 当完整路径候选与命令链剥离后的候选重名时，剥离更深的候选优先。
 // 若同一优先级下生成的 flag 名重复，Load / LoadCmd 会返回错误，而不是静默忽略。
 //
+// 使用 [Schema] 可在命令定义阶段复用同一套映射规则，从配置字段的 desc tag
+// 获取 CLI flag Usage：
+//
+//	defaults := DefaultConfig()
+//	usage := cfgm.Schema(defaults).Command("client")
+//	flag := &cli.StringFlag{
+//	    Name:  "url",
+//	    Value: defaults.Client.URL,
+//	    Usage: usage.MustUsage("url"),
+//	}
+//
 // 使用 [AssertCommandFlagCoverage] 可在测试中确保命令覆盖指定配置前缀：
 //
 //	cfgm.AssertCommandFlagCoverage(t, clientCommand, DefaultConfig(),
