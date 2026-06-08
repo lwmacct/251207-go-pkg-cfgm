@@ -373,12 +373,14 @@ func generateEnvBindings(prefix string, keys []string) map[string]string {
 
 // applyCLIFlagsGeneric 将用户显式设置的 CLI flags 写入配置 map。
 //
-// CLI flag 使用配置路径，并移除与命令链匹配的作用域前缀：
+// CLI flag 使用配置路径，并递归移除与命令链匹配的作用域前缀：
 //   - `server.addr` 在 `server` 命令下映射为 `--addr`
 //   - `client.server.addr` 在 `client` 命令下映射为 `--server.addr`
+//   - `server.service.port` 在 `server service` 命令链下映射为 `--port`
 //   - 无命令作用域时保留完整路径，如 `server.addr` 映射为 `--server.addr`
 //
-// 同一命令下生成的 flag 名若重复，会直接报错而不是静默忽略。
+// 完整路径是 fallback 候选；当它与更深的命令链剥离候选重名时，后者优先。
+// 同一优先级下生成的 flag 名若重复，会直接报错而不是静默忽略。
 //
 // 支持的类型：
 //   - 基本类型: string, bool

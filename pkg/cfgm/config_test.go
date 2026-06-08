@@ -562,6 +562,50 @@ func TestLoadWithCommand_ScopedFlagWinsOverRootFullPath(t *testing.T) {
 	assert.Equal(t, "server-default", cfg.Server.Hostkey)
 }
 
+func TestLoadWithCommand_DeeperCommandScopeWins(t *testing.T) {
+	type ServiceConfig struct {
+		Port int `json:"port"`
+	}
+	type ServerConfig struct {
+		Service ServiceConfig `json:"service"`
+	}
+	type Config struct {
+		Server  ServerConfig  `json:"server"`
+		Service ServiceConfig `json:"service"`
+	}
+
+	defaultCfg := Config{
+		Server:  ServerConfig{Service: ServiceConfig{Port: 8080}},
+		Service: ServiceConfig{Port: 9090},
+	}
+	var loadedCfg *Config
+	serviceCmd := &cli.Command{
+		Name: "service",
+		Flags: []cli.Flag{
+			&cli.IntFlag{Name: "port", Value: defaultCfg.Server.Service.Port},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := Load(defaultCfg, WithCommand(cmd))
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+
+			return nil
+		},
+	}
+	serverCmd := &cli.Command{
+		Name:     "server",
+		Commands: []*cli.Command{serviceCmd},
+	}
+
+	err := serverCmd.Run(context.Background(), []string{"server", "service", "--port", "7000"})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+	assert.Equal(t, 7000, loadedCfg.Server.Service.Port)
+	assert.Equal(t, 9090, loadedCfg.Service.Port)
+}
+
 func TestLoadWithCommand_SubCommands(t *testing.T) {
 	type ClientConfig struct {
 		URL     string `json:"url"`

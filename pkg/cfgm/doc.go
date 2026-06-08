@@ -103,13 +103,15 @@
 //
 // # CLI Flag 映射
 //
-// CLI flag 默认使用配置路径，并移除与命令链匹配的作用域前缀：
+// CLI flag 默认使用配置路径，并递归移除与命令链匹配的作用域前缀：
 //   - `server` 命令下，`server.addr` → `--addr`
 //   - `client` 命令下，`client.server.addr` → `--server.addr`
+//   - `server service` 命令链下，`server.service.port` → `--port`
 //   - 无命令作用域时，`server.addr` → `--server.addr`
-//   - 显式完整路径始终可用，如 `server` 命令下仍可声明 `--redis.url`
+//   - 完整路径作为 fallback 候选，如 `server` 命令下仍可声明 `--redis.url`
 //
-// 若同一命令下生成的 flag 名重复，Load / LoadCmd 会返回错误，而不是静默忽略。
+// 当完整路径候选与命令链剥离后的候选重名时，剥离更深的候选优先。
+// 若同一优先级下生成的 flag 名重复，Load / LoadCmd 会返回错误，而不是静默忽略。
 //
 // 使用 [AssertCommandFlagCoverage] 可在测试中确保命令覆盖指定配置前缀：
 //
