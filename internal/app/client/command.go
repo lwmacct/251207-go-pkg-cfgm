@@ -4,31 +4,34 @@ package client
 import (
 	"github.com/urfave/cli/v3"
 
-	"github.com/lwmacct/251207-go-pkg-cfgm/internal/command"
+	appflags "github.com/lwmacct/251207-go-pkg-cfgm/internal/app/flags"
+	"github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
 )
+
+var defaults = config.DefaultConfig()
 
 // Command 客户端命令
 var Command = &cli.Command{
 	Name:  "client",
 	Usage: "HTTP 客户端工具",
-	Flags: []cli.Flag{
+	Flags: append([]cli.Flag{
 		&cli.StringFlag{
 			Name:    "url",
 			Aliases: []string{"s"},
-			Value:   command.Defaults.Client.URL,
+			Value:   defaults.Client.URL,
 			Usage:   "服务器地址",
 		},
 		&cli.DurationFlag{
 			Name:  "timeout",
-			Value: command.Defaults.Client.Timeout,
+			Value: defaults.Client.Timeout,
 			Usage: "请求超时时间",
 		},
 		&cli.IntFlag{
 			Name:  "retries",
-			Value: command.Defaults.Client.Retries,
+			Value: defaults.Client.Retries,
 			Usage: "重试次数",
 		},
-	},
+	}, appflags.Redis(defaults.Redis)...),
 	Action: action,
 	Commands: []*cli.Command{
 		{

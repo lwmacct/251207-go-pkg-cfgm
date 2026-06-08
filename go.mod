@@ -3,6 +3,7 @@ module github.com/lwmacct/251207-go-pkg-cfgm
 go 1.26.1
 
 require (
+	github.com/danielgtaylor/huma/v2 v2.38.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.9.0

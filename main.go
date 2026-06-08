@@ -7,8 +7,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/lwmacct/251207-go-pkg-cfgm/internal/command/client"
-	"github.com/lwmacct/251207-go-pkg-cfgm/internal/command/server"
+	"github.com/lwmacct/251207-go-pkg-cfgm/internal/app/client"
+	"github.com/lwmacct/251207-go-pkg-cfgm/internal/app/server"
 )
 
 func main() {

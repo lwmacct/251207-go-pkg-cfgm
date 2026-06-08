@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/urfave/cli/v3"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
@@ -72,35 +73,62 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 func newMux(cfg *config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
+	api := humago.New(mux, humaConfig())
 
-	// 健康检查端点
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
-	})
+	registerAPIRoutes(api)
 
-	// VitePress 文档静态文件服务
-	docsFS := http.FileServer(http.Dir(cfg.Server.Docs))
-	mux.Handle("/docs/", http.StripPrefix("/docs/", docsFS))
-
-	// 默认首页（{$} 精确匹配根路径）
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"message":"Hello, World!"}`)
-	})
-
-	// 示例 GET 端点，便于 client get 直接验证请求链路。
-	mux.HandleFunc("GET /path", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(struct {
-			Message string `json:"message"`
-			Path    string `json:"path"`
-		}{
-			Message: "Hello, World!",
-			Path:    r.URL.Path,
+	if cfg.Server.FrontendDir != "" && dirExists(cfg.Server.FrontendDir) {
+		mux.Handle("GET /", http.FileServer(http.Dir(cfg.Server.FrontendDir)))
+	} else {
+		// 默认首页（{$} 精确匹配根路径）
+		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"message":"Hello, World!"}`)
 		})
-	})
+	}
 
 	return mux
+}
+
+func humaConfig() huma.Config {
+	cfg := huma.DefaultConfig("cfgm example", "1.0.0")
+	cfg.CreateHooks = nil
+
+	return cfg
+}
+
+type healthOutput struct {
+	Body struct {
+		Status string `json:"status" example:"ok" doc:"Health status"`
+	}
+}
+
+type pathOutput struct {
+	Body struct {
+		Message string `json:"message" example:"Hello, World!" doc:"Response message"`
+		Path    string `json:"path" example:"/path" doc:"Request path"`
+	}
+}
+
+func registerAPIRoutes(api huma.API) {
+	huma.Get(api, "/health", func(ctx context.Context, input *struct{}) (*healthOutput, error) {
+		resp := &healthOutput{}
+		resp.Body.Status = "ok"
+
+		return resp, nil
+	})
+
+	huma.Get(api, "/path", func(ctx context.Context, input *struct{}) (*pathOutput, error) {
+		resp := &pathOutput{}
+		resp.Body.Message = "Hello, World!"
+		resp.Body.Path = "/path"
+
+		return resp, nil
+	})
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && info.IsDir()
 }

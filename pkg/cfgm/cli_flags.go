@@ -85,20 +85,17 @@ func (i *cliConfigIndex) commandFields(cmd *cli.Command) (map[string]cliFieldMet
 	fields := make(map[string]cliFieldMeta)
 
 	for _, field := range i.fields {
-		flagName, ok := cliFlagName(field.configPath, scopes)
-		if !ok {
-			continue
+		for _, flagName := range cliFlagNames(field.configPath, scopes) {
+			if existing, exists := fields[flagName]; exists {
+				return nil, nil, fmt.Errorf(
+					"cfgm: CLI flag --%s is ambiguous: matches %s, %s",
+					flagName,
+					existing.configPath,
+					field.configPath,
+				)
+			}
+			fields[flagName] = field
 		}
-
-		if existing, exists := fields[flagName]; exists {
-			return nil, nil, fmt.Errorf(
-				"cfgm: CLI flag --%s is ambiguous: matches %s, %s",
-				flagName,
-				existing.configPath,
-				field.configPath,
-			)
-		}
-		fields[flagName] = field
 	}
 
 	flagNames := make([]string, 0, len(fields))
@@ -135,23 +132,19 @@ func isFrameworkFlag(flag cli.Flag) bool {
 	return false
 }
 
-func cliFlagName(configPath string, scopes []string) (string, bool) {
-	if !strings.Contains(configPath, ".") {
-		return configPath, true
-	}
+func cliFlagNames(configPath string, scopes []string) []string {
+	names := []string{configPath}
 
 	for _, v := range slices.Backward(scopes) {
 		scopePrefix := v + "."
 		if flagName, ok := strings.CutPrefix(configPath, scopePrefix); ok {
-			return flagName, true
+			names = append(names, flagName)
+
+			break
 		}
 	}
 
-	if len(scopes) == 0 {
-		return configPath, true
-	}
-
-	return "", false
+	return names
 }
 
 func findNestedStructType(typ reflect.Type, key string) (reflect.Type, bool) {

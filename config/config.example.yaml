@@ -4,7 +4,7 @@
 # 服务端配置
 server:
   addr: ":40117" # 服务器监听地址
-  docs: "docs/.vitepress/dist" # VitePress 文档目录路径
+  frontend-dir: "${FRONTEND_DIR:-dist}" # 前端静态文件目录
   timeout: 15s # HTTP 读写超时
   idletime: 1m0s # HTTP 空闲超时
 

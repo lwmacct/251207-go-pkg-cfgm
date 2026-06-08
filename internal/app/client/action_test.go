@@ -40,6 +40,9 @@ func TestClientCommandShowsClientHelpWithoutSubcommand(t *testing.T) {
 	assert.Contains(t, output, "client - HTTP 客户端工具")
 	assert.Contains(t, output, "health")
 	assert.Contains(t, output, "get")
+	assert.Contains(t, output, "--redis.url")
+	assert.Contains(t, output, "--redis.disabled")
+	assert.NotContains(t, output, "--redis.password")
 }
 
 func TestClientCommandRejectsUnknownSubcommand(t *testing.T) {

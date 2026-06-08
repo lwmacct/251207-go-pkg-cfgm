@@ -20,10 +20,10 @@ type Config struct {
 
 // ServerConfig 服务端配置。
 type ServerConfig struct {
-	Addr     string        `json:"addr" desc:"服务器监听地址"`
-	Docs     string        `json:"docs" desc:"VitePress 文档目录路径"`
-	Timeout  time.Duration `json:"timeout" desc:"HTTP 读写超时"`
-	Idletime time.Duration `json:"idletime" desc:"HTTP 空闲超时"`
+	Addr        string        `json:"addr" desc:"服务器监听地址"`
+	FrontendDir string        `json:"frontend-dir" desc:"前端静态文件目录"`
+	Timeout     time.Duration `json:"timeout" desc:"HTTP 读写超时"`
+	Idletime    time.Duration `json:"idletime" desc:"HTTP 空闲超时"`
 }
 
 // ClientConfig 客户端配置。
@@ -48,14 +48,14 @@ type RedisConfig struct {
 }
 
 // DefaultConfig 返回默认配置。
-// 注意：internal/command/command.go 中的 Defaults 变量引用此函数以实现单一配置来源。
+// 注意：internal/app 下的命令定义引用此函数以实现单一配置来源。
 func DefaultConfig() Config {
 	return Config{
 		Server: ServerConfig{
-			Addr:     ":40117",
-			Docs:     "docs/.vitepress/dist",
-			Timeout:  15 * time.Second,
-			Idletime: 60 * time.Second,
+			Addr:        ":40117",
+			FrontendDir: "${FRONTEND_DIR:-dist}",
+			Timeout:     15 * time.Second,
+			Idletime:    60 * time.Second,
 		},
 		Client: ClientConfig{
 			URL:     "http://127.0.0.1:40117",

@@ -496,6 +496,37 @@ func TestLoadWithCommand_NestedFlags(t *testing.T) {
 	assert.Equal(t, 60*time.Second, cfg.Server.Timeout)
 }
 
+func TestLoadWithCommand_FullPathFlagOnScopedCommand(t *testing.T) {
+	type Config struct {
+		Client struct {
+			URL string `json:"url"`
+		} `json:"client"`
+		Redis struct {
+			URL string `json:"url"`
+		} `json:"redis"`
+	}
+
+	defaultCfg := Config{}
+	defaultCfg.Client.URL = "http://default:8080"
+	defaultCfg.Redis.URL = "redis://default:6379/0"
+
+	flags := []cli.Flag{
+		&cli.StringFlag{Name: "url", Value: defaultCfg.Client.URL},
+		&cli.StringFlag{Name: "redis.url", Value: defaultCfg.Redis.URL},
+	}
+
+	cfg := runNamedCLITest(
+		t,
+		"client",
+		defaultCfg,
+		flags,
+		[]string{"client", "--redis.url", "redis://cli:6379/0"},
+	)
+
+	assert.Equal(t, "http://default:8080", cfg.Client.URL)
+	assert.Equal(t, "redis://cli:6379/0", cfg.Redis.URL)
+}
+
 func TestLoadWithCommand_SubCommands(t *testing.T) {
 	type ClientConfig struct {
 		URL     string `json:"url"`

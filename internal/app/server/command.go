@@ -4,8 +4,11 @@ package server
 import (
 	"github.com/urfave/cli/v3"
 
-	"github.com/lwmacct/251207-go-pkg-cfgm/internal/command"
+	appflags "github.com/lwmacct/251207-go-pkg-cfgm/internal/app/flags"
+	"github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
 )
+
+var defaults = config.DefaultConfig()
 
 // Command 服务器命令
 var Command = &cli.Command{
@@ -13,27 +16,27 @@ var Command = &cli.Command{
 	Usage:    "启动 HTTP 服务器",
 	Action:   action,
 	Commands: []*cli.Command{},
-	Flags: []cli.Flag{
+	Flags: append([]cli.Flag{
 		&cli.StringFlag{
 			Name:    "addr",
 			Aliases: []string{"a"},
-			Value:   command.Defaults.Server.Addr,
+			Value:   defaults.Server.Addr,
 			Usage:   "服务器监听地址",
 		},
 		&cli.StringFlag{
-			Name:  "docs",
-			Value: command.Defaults.Server.Docs,
-			Usage: "VitePress 文档目录路径",
+			Name:  "frontend-dir",
+			Value: defaults.Server.FrontendDir,
+			Usage: "前端静态文件目录",
 		},
 		&cli.DurationFlag{
 			Name:  "timeout",
-			Value: command.Defaults.Server.Timeout,
+			Value: defaults.Server.Timeout,
 			Usage: "HTTP 读写超时",
 		},
 		&cli.DurationFlag{
 			Name:  "idletime",
-			Value: command.Defaults.Server.Idletime,
+			Value: defaults.Server.Idletime,
 			Usage: "HTTP 空闲超时",
 		},
-	},
+	}, appflags.Redis(defaults.Redis)...),
 }
