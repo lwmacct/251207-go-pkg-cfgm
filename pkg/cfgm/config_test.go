@@ -713,6 +713,80 @@ func TestLoadWithCommand_StringSlice(t *testing.T) {
 	assert.Equal(t, []string{"host1", "host2", "host3"}, cfg.Hosts)
 }
 
+func TestValidateCommandFlagCoverage(t *testing.T) {
+	type Config struct {
+		Client struct {
+			URL     string `json:"url"`
+			Timeout int    `json:"timeout"`
+		} `json:"client"`
+		Redis struct {
+			URL      string `json:"url"`
+			Password string `json:"password"`
+		} `json:"redis"`
+		Server struct {
+			Addr string `json:"addr"`
+		} `json:"server"`
+	}
+
+	defaultCfg := Config{}
+	cmd := &cli.Command{
+		Name: "client",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "url"},
+			&cli.IntFlag{Name: "timeout"},
+			&cli.StringFlag{Name: "redis.url"},
+		},
+	}
+
+	err := ValidateCommandFlagCoverage(
+		cmd,
+		defaultCfg,
+		[]string{"client", "redis"},
+		IgnoreConfigKeys("redis.password"),
+	)
+	require.NoError(t, err)
+}
+
+func TestValidateCommandFlagCoverageReportsMissingFlags(t *testing.T) {
+	type Config struct {
+		Server struct {
+			Addr        string `json:"addr"`
+			FrontendDir string `json:"frontend-dir"`
+		} `json:"server"`
+	}
+
+	cmd := &cli.Command{
+		Name: "server",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "addr"},
+		},
+	}
+
+	err := ValidateCommandFlagCoverage(cmd, Config{}, []string{"server"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "server.frontend-dir")
+	assert.Contains(t, err.Error(), "--frontend-dir")
+	assert.Contains(t, err.Error(), "--server.frontend-dir")
+}
+
+func TestValidateCommandFlagCoverageAcceptsFullPathOnScopedCommand(t *testing.T) {
+	type Config struct {
+		Redis struct {
+			URL string `json:"url"`
+		} `json:"redis"`
+	}
+
+	cmd := &cli.Command{
+		Name: "server",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "redis.url"},
+		},
+	}
+
+	err := ValidateCommandFlagCoverage(cmd, Config{}, []string{"redis"})
+	require.NoError(t, err)
+}
+
 // =============================================================================
 // ExampleYAML 测试
 // =============================================================================

@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/lwmacct/251207-go-pkg-cfgm/internal/config"
+	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm"
 )
 
 func cloneCommandForTest(t *testing.T) *cli.Command {
@@ -53,4 +56,14 @@ func TestClientCommandRejectsUnknownSubcommand(t *testing.T) {
 	assert.Contains(t, err.Error(), `unknown client subcommand "healt"`)
 	assert.Contains(t, err.Error(), "Did you mean")
 	assert.Contains(t, err.Error(), "health")
+}
+
+func TestClientCommandCoversConfigFlags(t *testing.T) {
+	cfgm.AssertCommandFlagCoverage(
+		t,
+		Command,
+		config.DefaultConfig(),
+		[]string{"client", "redis"},
+		cfgm.IgnoreConfigKeys("redis.password"),
+	)
 }

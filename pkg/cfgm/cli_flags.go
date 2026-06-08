@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"testing"
 
 	"github.com/urfave/cli/v3"
 )
@@ -121,6 +122,125 @@ func validateCommandFlags(cmd *cli.Command, fields map[string]cliFieldMeta) erro
 	}
 
 	return nil
+}
+
+type flagCoverageOptions struct {
+	ignoredKeys map[string]bool
+}
+
+// FlagCoverageOption 配置 CLI flag 覆盖率校验。
+type FlagCoverageOption func(*flagCoverageOptions)
+
+// IgnoreConfigKeys 在 CLI flag 覆盖率校验中忽略指定配置 key。
+//
+// 适合排除不应通过 CLI 传入的敏感字段，例如 redis.password。
+func IgnoreConfigKeys(keys ...string) FlagCoverageOption {
+	return func(o *flagCoverageOptions) {
+		if o.ignoredKeys == nil {
+			o.ignoredKeys = make(map[string]bool, len(keys))
+		}
+		for _, key := range keys {
+			o.ignoredKeys[key] = true
+		}
+	}
+}
+
+// ValidateCommandFlagCoverage 校验命令是否声明了指定配置前缀下的所有 CLI flags。
+//
+// prefixes 为配置前缀，如 "client"、"server"、"redis"。只校验这些前缀下的叶子配置项。
+// flag 名称使用与 [LoadCmd] 相同的映射规则：命令作用域内可使用短名，完整路径始终可用。
+func ValidateCommandFlagCoverage[T any](
+	cmd *cli.Command,
+	defaultConfig T,
+	prefixes []string,
+	opts ...FlagCoverageOption,
+) error {
+	options := &flagCoverageOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	index := newCLIConfigIndex(reflect.TypeOf(defaultConfig))
+	scopes := index.commandScopes(cmd)
+	visibleFlags := commandVisibleFlagNames(cmd)
+
+	var missing []string
+	for _, field := range index.fields {
+		if !isCoveredPrefix(field.configPath, prefixes) || options.ignoredKeys[field.configPath] {
+			continue
+		}
+
+		expectedFlags := cliFlagNames(field.configPath, scopes)
+		if hasAnyFlag(visibleFlags, expectedFlags) {
+			continue
+		}
+
+		missing = append(missing, fmt.Sprintf(
+			"%s (expected one of: --%s)",
+			field.configPath,
+			strings.Join(expectedFlags, ", --"),
+		))
+	}
+
+	if len(missing) > 0 {
+		slices.Sort(missing)
+
+		return fmt.Errorf("cfgm: missing CLI flags for config keys:\n  - %s", strings.Join(missing, "\n  - "))
+	}
+
+	return nil
+}
+
+// AssertCommandFlagCoverage 是 [ValidateCommandFlagCoverage] 的测试辅助版本。
+func AssertCommandFlagCoverage[T any](
+	t *testing.T,
+	cmd *cli.Command,
+	defaultConfig T,
+	prefixes []string,
+	opts ...FlagCoverageOption,
+) {
+	t.Helper()
+
+	if err := ValidateCommandFlagCoverage(cmd, defaultConfig, prefixes, opts...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commandVisibleFlagNames(cmd *cli.Command) map[string]bool {
+	names := map[string]bool{}
+	if cmd == nil {
+		return names
+	}
+
+	for _, flag := range cmd.VisibleFlags() {
+		for _, name := range flag.Names() {
+			if name != "" {
+				names[name] = true
+			}
+		}
+	}
+
+	return names
+}
+
+func isCoveredPrefix(configPath string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if configPath == prefix || strings.HasPrefix(configPath, prefix+".") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasAnyFlag(visibleFlags map[string]bool, names []string) bool {
+	for _, name := range names {
+		if visibleFlags[name] {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isFrameworkFlag(flag cli.Flag) bool {

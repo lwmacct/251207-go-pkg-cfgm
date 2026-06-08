@@ -111,6 +111,15 @@
 //
 // 若同一命令下生成的 flag 名重复，Load / LoadCmd 会返回错误，而不是静默忽略。
 //
+// 使用 [AssertCommandFlagCoverage] 可在测试中确保命令覆盖指定配置前缀：
+//
+//	cfgm.AssertCommandFlagCoverage(t, clientCommand, DefaultConfig(),
+//	    []string{"client", "redis"},
+//	    cfgm.IgnoreConfigKeys("redis.password"),
+//	)
+//
+// 这适合在配置结构新增字段时防止遗漏对应 CLI flag。
+//
 // # 生成配置示例
 //
 // 使用 [ExampleYAML] 生成带注释的 YAML：
