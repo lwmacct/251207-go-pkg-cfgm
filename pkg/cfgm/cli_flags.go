@@ -155,11 +155,14 @@ func (i *cliConfigIndex) fieldsForScopes(scopes []string) (map[string]cliFieldMe
 	return fields, flagNames, nil
 }
 
-func validateCommandFlags(cmd *cli.Command, fields map[string]cliFieldMeta) error {
+func validateCommandFlags(cmd *cli.Command, fields map[string]cliFieldMeta, ignoredCLIFlags map[string]bool) error {
 	for _, command := range cmd.Lineage() {
 		for _, flag := range command.VisibleFlags() {
 			names := flag.Names()
 			if len(names) == 0 || isFrameworkFlag(flag) {
+				continue
+			}
+			if ignoredCLIFlags[names[0]] {
 				continue
 			}
 			if _, ok := fields[names[0]]; !ok {

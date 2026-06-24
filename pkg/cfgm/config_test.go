@@ -475,6 +475,58 @@ func TestLoadWithCommand_RejectsUnmappedFlag(t *testing.T) {
 	assert.Contains(t, err.Error(), "CLI flag --aliveInterval has no matching config field")
 }
 
+func TestLoadWithCommand_IgnoresExplicitNonConfigFlag(t *testing.T) {
+	type Config struct {
+		Debug bool `json:"debug"`
+	}
+
+	defaultCfg := Config{}
+	var loadedCfg *Config
+	cmd := &cli.Command{
+		Name: "sync",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "debug", Value: defaultCfg.Debug},
+			&cli.StringFlag{Name: "host"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := Load(defaultCfg, WithCommand(cmd), WithIgnoredCLIFlags("host"))
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+
+			return nil
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{"sync", "--host", "web-1", "--debug"})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+	assert.True(t, loadedCfg.Debug)
+}
+
+func TestLoadWithCommand_IgnoredNonConfigFlagUsesPrimaryName(t *testing.T) {
+	type Config struct {
+		Debug bool `json:"debug"`
+	}
+
+	defaultCfg := Config{}
+	cmd := &cli.Command{
+		Name: "sync",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "host", Aliases: []string{"H"}},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			_, err := Load(defaultCfg, WithCommand(cmd), WithIgnoredCLIFlags("H"))
+			return err
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{"sync", "--host", "web-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CLI flag --host has no matching config field")
+}
+
 func TestLoadWithCommand_NestedFlags(t *testing.T) {
 	type ServerConfig struct {
 		Addr    string        `json:"addr"`

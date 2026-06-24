@@ -162,7 +162,7 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 
 	// 4️⃣ 加载 CLI flags (最高优先级，仅当用户明确指定时)
 	if options.cmd != nil {
-		if err := applyCLIFlagsGeneric(options.cmd, configMap, defaultConfig); err != nil {
+		if err := applyCLIFlagsGeneric(options.cmd, configMap, defaultConfig, options.ignoredCLIFlags); err != nil {
 			return nil, err
 		}
 	}
@@ -390,13 +390,13 @@ func generateEnvBindings(prefix string, keys []string) map[string]string {
 //   - 时间类型: time.Duration, time.Time
 //   - 切片类型: []string, []int, []int64, []float64 等
 //   - Map 类型: map[string]string
-func applyCLIFlagsGeneric[T any](cmd *cli.Command, config map[string]any, defaultConfig T) error {
+func applyCLIFlagsGeneric[T any](cmd *cli.Command, config map[string]any, defaultConfig T, ignoredCLIFlags map[string]bool) error {
 	index := newCLIConfigIndex(reflect.TypeOf(defaultConfig))
 	fields, flagNames, err := index.commandFields(cmd)
 	if err != nil {
 		return err
 	}
-	if err := validateCommandFlags(cmd, fields); err != nil {
+	if err := validateCommandFlags(cmd, fields, ignoredCLIFlags); err != nil {
 		return err
 	}
 

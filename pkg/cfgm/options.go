@@ -13,6 +13,7 @@ type options struct {
 	baseDirSet          bool   // 是否显式设置了 baseDir（区分空字符串和未设置）
 	envPrefix           string
 	envPrefixSet        bool
+	ignoredCLIFlags     map[string]bool
 	noTemplateExpansion bool // 是否禁用配置模板展开（默认启用）
 	callerSkip          int  // FindProjectRoot 的调用栈跳过层数（0 表示使用默认值）
 }
@@ -37,6 +38,24 @@ func ConfigFlag() cli.Flag {
 func WithCommand(cmd *cli.Command) Option {
 	return func(o *options) {
 		o.cmd = cmd
+	}
+}
+
+// WithIgnoredCLIFlags 声明不映射到配置结构体的 CLI flags。
+//
+// Load / LoadCmd 默认会校验命令上的每个非框架 flag 都能映射到配置字段，
+// 以便尽早发现拼错的配置 flag。对于只控制本次操作、不属于持久配置的
+// 业务 flag（例如 --dry-run、--force、--format），可通过该选项显式跳过。
+func WithIgnoredCLIFlags(names ...string) Option {
+	return func(o *options) {
+		if o.ignoredCLIFlags == nil {
+			o.ignoredCLIFlags = make(map[string]bool, len(names))
+		}
+		for _, name := range names {
+			if name != "" {
+				o.ignoredCLIFlags[name] = true
+			}
+		}
 	}
 }
 
