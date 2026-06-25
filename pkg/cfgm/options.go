@@ -47,7 +47,7 @@ func EnvPrefixFlag() cli.Flag {
 	return &cli.StringFlag{
 		Name:    envPrefixFlagName,
 		Aliases: []string{"e"},
-		Usage:   "环境变量前缀（默认：命令名转大写；空字符串禁用环境变量绑定）",
+		Usage:   "环境变量前缀",
 	}
 }
 
