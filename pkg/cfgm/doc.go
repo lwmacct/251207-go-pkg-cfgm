@@ -75,7 +75,10 @@
 //
 // # 环境变量(前缀)
 //
-// 默认会使用 "APP_" 前缀生成环境变量绑定。
+// 默认会使用命令名转换后的前缀生成环境变量绑定。
+// 转换规则：命令名转大写，连字符(-)转为下划线(_)，末尾添加下划线。
+// 例如：myapp → MYAPP_, my-app → MY_APP_, cfgm → CFGM_。
+//
 // 调用 [WithEnvPrefix] 可覆盖默认前缀；传入空字符串可禁用该行为。
 //
 // 环境变量命名规则：
@@ -90,7 +93,7 @@
 // # 环境变量前缀 CLI flag
 //
 // [EnvPrefixFlag] 提供全局 CLI flag --env-prefix / -e，用于在运行时覆盖环境变量前缀。
-// 优先级：CLI flag > [WithEnvPrefix] 选项 > 默认值 "APP_"。
+// 优先级：CLI flag > [WithEnvPrefix] 选项 > 命令名前缀。
 //
 // 示例：
 //

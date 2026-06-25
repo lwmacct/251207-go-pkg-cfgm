@@ -291,11 +291,15 @@ func cmdOptions(cmd *cli.Command) []Option {
 	if configPath := commandConfigPath(cmd); configPath != "" {
 		opts = append(opts, WithConfigPaths(configPath))
 	}
-	// CLI flag 优先级高于 WithEnvPrefix() 选项
+	// CLI flag 优先级最高
 	if isSet := cmdIsSet(cmd, envPrefixFlagName); isSet {
 		envPrefix := commandEnvPrefix(cmd)
-		slog.Debug("cmdOptions: env-prefix flag is set", "value", envPrefix)
 		opts = append(opts, WithEnvPrefix(envPrefix))
+	} else {
+		// 未设置 CLI flag 时，使用命令名作为默认前缀
+		if prefix := commandNameToEnvPrefix(cmd); prefix != "" {
+			opts = append(opts, WithEnvPrefix(prefix))
+		}
 	}
 
 	return opts
@@ -313,6 +317,22 @@ func commandConfigPath(cmd *cli.Command) string {
 	}
 
 	return ""
+}
+
+// commandNameToEnvPrefix 将命令名转换为环境变量前缀。
+// 转换规则：转为大写，连字符(-)转为下划线(_)，末尾添加下划线。
+// 例如：myapp → MYAPP_, my-app → MY_APP_, cfgm → CFGM_。
+// 如果命令为空或名称为空，返回空字符串（由 load 函数使用 APP_ 作为 fallback）。
+func commandNameToEnvPrefix(cmd *cli.Command) string {
+	if cmd == nil {
+		return ""
+	}
+	name := cmd.Name
+	if name == "" {
+		return ""
+	}
+	// 转大写并将 - 替换为 _
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_"
 }
 
 // commandEnvPrefix 从命令链获取环境变量前缀。

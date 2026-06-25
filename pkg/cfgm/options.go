@@ -41,13 +41,13 @@ func ConfigFlag() cli.Flag {
 // --env-prefix / -e 指定的前缀，并使用它覆盖 [WithEnvPrefix] 设置的值。
 // 该 flag 不会映射到配置结构体字段。
 //
-// 默认值为 "APP_"；显式设置空字符串可禁用环境变量绑定。
+// 未设置时使用命令名转换后的前缀（如 myapp → MYAPP_，my-app → MY_APP_）。
+// 显式设置空字符串可禁用环境变量绑定。
 func EnvPrefixFlag() cli.Flag {
 	return &cli.StringFlag{
 		Name:    envPrefixFlagName,
 		Aliases: []string{"e"},
-		Value:   "APP_",
-		Usage:   "环境变量前缀（默认：APP_；空字符串禁用环境变量绑定）",
+		Usage:   "环境变量前缀（默认：命令名转大写；空字符串禁用环境变量绑定）",
 	}
 }
 

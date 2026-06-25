@@ -840,6 +840,7 @@ func TestLoadCmdEnvPrefixFlagPriority(t *testing.T) {
 	}
 
 	t.Setenv("APP_NAME", "from-app")
+	t.Setenv("TEST_NAME", "from-test")
 	t.Setenv("CUSTOM_NAME", "from-custom")
 
 	defaultCfg := Config{Name: "default"}
@@ -858,12 +859,72 @@ func TestLoadCmdEnvPrefixFlagPriority(t *testing.T) {
 		},
 	}
 
-	// 不设置 CLI flag，应使用默认值 APP_
+	// 不设置 CLI flag，应使用命令名转换后的前缀 TEST_
 	err := cmd.Run(context.Background(), []string{"test"})
 	require.NoError(t, err)
 	require.NotNil(t, loadedCfg)
 
-	assert.Equal(t, "from-app", loadedCfg.Name, "should use default APP_ prefix when no flag set")
+	assert.Equal(t, "from-test", loadedCfg.Name, "should use command name prefix when no flag set")
+}
+
+func TestLoadCmdUsesCommandNameForEnvPrefix(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tests := []struct {
+		name          string
+		commandName   string
+		envVar        string
+		expectedValue string
+	}{
+		{
+			name:          "simple name",
+			commandName:   "myapp",
+			envVar:        "MYAPP_NAME",
+			expectedValue: "from-myapp",
+		},
+		{
+			name:          "name with hyphen",
+			commandName:   "my-app",
+			envVar:        "MY_APP_NAME",
+			expectedValue: "from-my-app",
+		},
+		{
+			name:          "cfgm name",
+			commandName:   "cfgm",
+			envVar:        "CFGM_NAME",
+			expectedValue: "from-cfgm",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.envVar, tt.expectedValue)
+
+			defaultCfg := Config{Name: "default"}
+			var loadedCfg *Config
+
+			cmd := &cli.Command{
+				Name:  tt.commandName,
+				Flags: []cli.Flag{EnvPrefixFlag()},
+				Action: func(_ context.Context, cmd *cli.Command) error {
+					cfg, err := LoadCmd(cmd, defaultCfg, "")
+					if err != nil {
+						return err
+					}
+					loadedCfg = cfg
+					return nil
+				},
+			}
+
+			err := cmd.Run(context.Background(), []string{tt.commandName})
+			require.NoError(t, err)
+			require.NotNil(t, loadedCfg)
+
+			assert.Equal(t, tt.expectedValue, loadedCfg.Name)
+		})
+	}
 }
 
 func TestLoadWithCommand_FullPathDisambiguatesNestedFlags(t *testing.T) {
