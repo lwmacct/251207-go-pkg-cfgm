@@ -880,9 +880,9 @@ func TestLoadCmdUsesCommandNameForEnvPrefix(t *testing.T) {
 	}{
 		{
 			name:          "simple name",
-			commandName:   "myapp",
-			envVar:        "MYAPP_NAME",
-			expectedValue: "from-myapp",
+			commandName:   "app",
+			envVar:        "APP_NAME",
+			expectedValue: "from-app",
 		},
 		{
 			name:          "name with hyphen",
@@ -932,7 +932,7 @@ func TestLoadCmdUsesRootCommandNameForEnvPrefix(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	t.Setenv("MYAPP_NAME", "from-myapp")
+	t.Setenv("APP_NAME", "from-app")
 
 	defaultCfg := Config{Name: "default"}
 	var loadedCfg *Config
@@ -950,15 +950,15 @@ func TestLoadCmdUsesRootCommandNameForEnvPrefix(t *testing.T) {
 		},
 	}
 	rootCmd := &cli.Command{
-		Name:     "myapp",
+		Name:     "app",
 		Commands: []*cli.Command{subCmd},
 	}
 
-	err := rootCmd.Run(context.Background(), []string{"myapp", "server"})
+	err := rootCmd.Run(context.Background(), []string{"app", "server"})
 	require.NoError(t, err)
 	require.NotNil(t, loadedCfg)
 
-	assert.Equal(t, "from-myapp", loadedCfg.Name, "should use root command name prefix in subcommand")
+	assert.Equal(t, "from-app", loadedCfg.Name, "should use root command name prefix in subcommand")
 }
 func TestLoadWithCommand_FullPathDisambiguatesNestedFlags(t *testing.T) {
 	type EndpointConfig struct {
@@ -1387,9 +1387,9 @@ func TestDefaultPaths(t *testing.T) {
 		},
 		{
 			name:        "with app name",
-			appName:     "myapp",
+			appName:     "app",
 			minLen:      4,
-			mustContain: []string{".myapp.yaml", "/etc/myapp/config.yaml", "config.yaml", "config/config.yaml"},
+			mustContain: []string{".app.yaml", "/etc/app/config.yaml", "config.yaml", "config/config.yaml"},
 		},
 	}
 
@@ -1976,14 +1976,14 @@ func TestExampleYAML_MultilineComment(t *testing.T) {
 			Name string `json:"name" desc:"应用名称"`
 			DB   DB     `json:"db" desc:"数据库配置\n支持 PostgreSQL"`
 		}{
-			Name: "myapp",
+			Name: "app",
 			DB:   DB{Host: "localhost", Port: 5432},
 		}
 
 		yaml := string(ExampleYAML(cfg))
 
 		a := assert.New(t)
-		a.Contains(yaml, `name: "myapp"`)
+		a.Contains(yaml, `name: "app"`)
 		a.Contains(yaml, "应用名称")
 		a.Contains(yaml, "db:")
 		a.Contains(yaml, "数据库配置")
