@@ -23,15 +23,15 @@
 // 推荐使用 LoadCmd：
 //
 //	app := &cli.Command{
-//	    Name:  "myapp",
+//	    Name:  "app",
 //	    Flags: []cli.Flag{
 //	        cfgm.ConfigFlag(),  // 支持 --config / -c
 //	        cfgm.EnvPrefixFlag(), // 支持 --env-prefix / -e
 //	    },
 //	}
 //
-//	// 自动使用命令名 "myapp" → 前缀 "MYAPP_"
-//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp")
+//	// 自动使用命令名 "app" → 前缀 "APP_"
+//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "app")
 //
 // 或使用 Load 组合选项：
 //
@@ -40,22 +40,22 @@
 //	    Debug:   false,
 //	    Timeout: 30 * time.Second,
 //	},
-//	    cfgm.WithAppName("myapp"),
+//	    cfgm.WithAppName("app"),
 //	    cfgm.WithCommand(cmd),
 //	)
 //
 // # 配置文件路径
 //
 // [WithAppName] 会生成默认搜索路径（见 [DefaultPaths]）：
-//   - .myapp.yaml (当前目录)
-//   - ~/.myapp.yaml (用户主目录)
+//   - .app.yaml (当前目录)
+//   - ~/.app.yaml (用户主目录)
 //   - /etc/myapp/config.yaml (系统配置)
 //   - config.yaml, config/config.yaml (通用路径)
 //
 // 如需自定义路径，使用 [WithConfigPaths]：
 //
 //	cfgm.Load(config,
-//	    cfgm.WithAppName("myapp"),          // 仍可用于其他用途
+//	    cfgm.WithAppName("app"),          // 仍可用于其他用途
 //	    cfgm.WithConfigPaths("custom.yaml"), // 覆盖默认路径
 //	)
 //
@@ -67,7 +67,7 @@
 //
 // [LoadCmd] / [MustLoadCmd] 会自动读取命令链上的 --config / -c：
 //
-//	myapp --config ./config.yaml server
+//	app --config ./config.yaml server
 //
 // 指定后，该路径会作为唯一配置文件搜索路径；未指定时使用 [WithAppName] / 默认路径规则。
 //
@@ -75,7 +75,7 @@
 //
 // 默认会使用命令名转换后的前缀生成环境变量绑定。
 // 转换规则：命令名转大写，连字符(-)转为下划线(_)，末尾添加下划线。
-// 例如：myapp → MYAPP_, my-app → MY_APP_, cfgm → CFGM_。
+// 例如：app → APP_, app-name → APP_NAME_。
 //
 // 调用 [WithEnvPrefix] 可覆盖默认前缀；传入空字符串可禁用该行为。
 //
@@ -84,9 +84,9 @@
 //   - 点号 (.) 和连字符 (-) 转为下划线 (_)
 //
 // 示例：
-//   - MYAPP_DEBUG → debug
-//   - MYAPP_SERVER_URL → server.url
-//   - MYAPP_CLIENT_REV_AUTH_USER → client.rev-auth-user
+//   - APP_DEBUG → debug
+//   - APP_SERVER_URL → server.url
+//   - APP_CLIENT_REV_AUTH_USER → client.rev-auth-user
 //
 // # 环境变量前缀 CLI flag
 //
@@ -95,9 +95,9 @@
 //
 // 示例：
 //
-//	myapp --env-prefix CUSTOM_        // 使用 CUSTOM_ 前缀
-//	myapp --env-prefix ""             // 禁用环境变量绑定
-//	myapp -e PROD_                    // 使用短别名
+//	app --env-prefix CUSTOM_        // 使用 CUSTOM_ 前缀
+//	app --env-prefix ""             // 禁用环境变量绑定
+//	app -e PROD_                    // 使用短别名
 //
 // CLI 场景可将 [EnvPrefixFlag] 挂到根命令或子命令：
 //

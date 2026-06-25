@@ -1510,12 +1510,12 @@ func TestGenerateEnvBindings(t *testing.T) {
 		},
 		{
 			name:   "nested",
-			prefix: "MYAPP_",
+			prefix: "CUSTOM_",
 			keys:   []string{"server.host", "server.port", "client.url"},
 			expected: map[string]string{
-				"MYAPP_SERVER_HOST": "server.host",
-				"MYAPP_SERVER_PORT": "server.port",
-				"MYAPP_CLIENT_URL":  "client.url",
+				"CUSTOM_SERVER_HOST": "server.host",
+				"CUSTOM_SERVER_PORT": "server.port",
+				"CUSTOM_CLIENT_URL":  "client.url",
 			},
 		},
 		{

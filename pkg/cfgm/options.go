@@ -143,10 +143,10 @@ func WithCallerSkip(skip int) Option {
 // 默认前缀为 "APP_"；显式调用后以传入值为准。
 // 传入空字符串可禁用默认的前缀绑定。
 //
-// 示例 (前缀为 "MYAPP_")：
-//   - MYAPP_DEBUG → debug
-//   - MYAPP_SERVER_URL → server.url
-//   - MYAPP_CLIENT_REV_AUTH_USER → client.rev-auth-user
+// 示例 (前缀为 "APP_")：
+//   - APP_DEBUG → debug
+//   - APP_SERVER_URL → server.url
+//   - APP_CLIENT_REV_AUTH_USER → client.rev-auth-user
 //
 // 注意：通过反射自动生成配置 key 的绑定，只匹配结构体中定义的 key。
 func WithEnvPrefix(prefix string) Option {

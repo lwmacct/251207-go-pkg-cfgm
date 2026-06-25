@@ -227,10 +227,8 @@ func expandTemplateValues(value any) (any, error) {
 //
 // 示例：
 //
-//	// 带应用名（推荐）
-//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp",
-//	    cfgm.WithEnvPrefix("MYAPP_"),
-//	)
+//	// 使用命令名自动生成前缀
+//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp")
 //
 //	// 不带应用名
 //	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "")
@@ -254,7 +252,7 @@ func LoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...O
 //
 //	cfg := cfgm.MustLoad(DefaultConfig(),
 //	    cfgm.WithAppName("myapp"),
-//	    cfgm.WithEnvPrefix("MYAPP_"),
+//	    cfgm.WithEnvPrefix("APP_"),
 //	)
 func MustLoad[T any](defaultConfig T, opts ...Option) *T {
 	cfg, err := load(defaultConfig, 2, opts...)
@@ -269,9 +267,7 @@ func MustLoad[T any](defaultConfig T, opts ...Option) *T {
 //
 // 示例：
 //
-//	cfg := cfgm.MustLoadCmd(cmd, DefaultConfig(), "myapp",
-//	    cfgm.WithEnvPrefix("MYAPP_"),
-//	)
+//	cfg := cfgm.MustLoadCmd(cmd, DefaultConfig(), "myapp")
 func MustLoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...Option) *T {
 	baseOpts := cmdOptions(cmd)
 	if appName != "" {
@@ -321,7 +317,7 @@ func commandConfigPath(cmd *cli.Command) string {
 
 // commandNameToEnvPrefix 将根命令名转换为环境变量前缀。
 // 转换规则：转为大写，连字符(-)转为下划线(_)，末尾添加下划线。
-// 例如：myapp → MYAPP_, my-app → MY_APP_, zabbix-tools → ZABBIX_TOOLS_。
+// 例如：app → APP_, app-name → APP_NAME_。
 // 如果命令为空或名称为空，返回空字符串（由 load 函数使用 APP_ 作为 fallback）。
 func commandNameToEnvPrefix(cmd *cli.Command) string {
 	if cmd == nil {

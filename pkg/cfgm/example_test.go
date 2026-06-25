@@ -119,10 +119,10 @@ func Example_load_withEnvPrefix() {
 		Debug: false,
 	}
 
-	// 使用环境变量前缀 "MYAPP_"
-	// 支持的环境变量：MYAPP_NAME, MYAPP_DEBUG
+	// 使用环境变量前缀 "APP_"
+	// 支持的环境变量：APP_NAME, APP_DEBUG
 	cfg, err := cfgm.Load(defaultCfg,
-		cfgm.WithEnvPrefix("MYAPP_"),
+		cfgm.WithEnvPrefix("APP_"),
 	)
 	if err != nil {
 		fmt.Println("加载失败:", err)
@@ -130,7 +130,7 @@ func Example_load_withEnvPrefix() {
 		return
 	}
 
-	// 如果设置了 MYAPP_NAME=prod-app，则 cfg.Name 为 "prod-app"
+	// 如果设置了 APP_NAME=prod-app，则 cfg.Name 为 "prod-app"
 	// 如果没有设置环境变量，则使用默认值
 	fmt.Println("Name:", cfg.Name)
 	fmt.Println("Debug:", cfg.Debug)
