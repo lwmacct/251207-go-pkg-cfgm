@@ -319,15 +319,21 @@ func commandConfigPath(cmd *cli.Command) string {
 	return ""
 }
 
-// commandNameToEnvPrefix 将命令名转换为环境变量前缀。
+// commandNameToEnvPrefix 将根命令名转换为环境变量前缀。
 // 转换规则：转为大写，连字符(-)转为下划线(_)，末尾添加下划线。
-// 例如：myapp → MYAPP_, my-app → MY_APP_, cfgm → CFGM_。
+// 例如：myapp → MYAPP_, my-app → MY_APP_, zabbix-tools → ZABBIX_TOOLS_。
 // 如果命令为空或名称为空，返回空字符串（由 load 函数使用 APP_ 作为 fallback）。
 func commandNameToEnvPrefix(cmd *cli.Command) string {
 	if cmd == nil {
 		return ""
 	}
-	name := cmd.Name
+	// 获取根命令（命令链的最后一个）
+	lineage := cmd.Lineage()
+	if len(lineage) == 0 {
+		return ""
+	}
+	rootCmd := lineage[len(lineage)-1]
+	name := rootCmd.Name
 	if name == "" {
 		return ""
 	}

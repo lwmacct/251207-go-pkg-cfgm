@@ -927,6 +927,39 @@ func TestLoadCmdUsesCommandNameForEnvPrefix(t *testing.T) {
 	}
 }
 
+func TestLoadCmdUsesRootCommandNameForEnvPrefix(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	t.Setenv("MYAPP_NAME", "from-myapp")
+
+	defaultCfg := Config{Name: "default"}
+	var loadedCfg *Config
+
+	subCmd := &cli.Command{
+		Name:  "server",
+		Flags: []cli.Flag{EnvPrefixFlag()},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := LoadCmd(cmd, defaultCfg, "")
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+			return nil
+		},
+	}
+	rootCmd := &cli.Command{
+		Name:     "myapp",
+		Commands: []*cli.Command{subCmd},
+	}
+
+	err := rootCmd.Run(context.Background(), []string{"myapp", "server"})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+
+	assert.Equal(t, "from-myapp", loadedCfg.Name, "should use root command name prefix in subcommand")
+}
 func TestLoadWithCommand_FullPathDisambiguatesNestedFlags(t *testing.T) {
 	type EndpointConfig struct {
 		Addr string `json:"addr"`
