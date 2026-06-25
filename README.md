@@ -15,16 +15,16 @@
 
 - [特性](#特性) `:31+10`
 - [安装](#安装) `:41+6`
-- [快速开始](#快速开始) `:47+252`
+- [快速开始](#快速开始) `:47+271`
   - [1. 定义配置结构体](#1-定义配置结构体) `:49+36`
   - [2. 加载配置](#2-加载配置) `:85+112`
-  - [3. 环境变量](#3-环境变量) `:197+24`
-  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:221+78`
-- [模板语法](#模板语法) `:299+44`
-  - [基本语法](#基本语法) `:307+16`
-  - [语义说明](#语义说明) `:323+7`
-  - [使用示例](#使用示例) `:330+13`
-- [License](#license) `:343+3`
+  - [3. 环境变量](#3-环境变量) `:197+43`
+  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:240+78`
+- [模板语法](#模板语法) `:318+44`
+  - [基本语法](#基本语法) `:326+16`
+  - [语义说明](#语义说明) `:342+7`
+  - [使用示例](#使用示例) `:349+13`
+- [License](#license) `:362+3`
 
 <!--TOC-->
 
@@ -93,12 +93,12 @@ cfg, err := cfgm.Load(DefaultConfig(),
     cfgm.WithAppName("app"),
 )
 
-// 默认启用环境变量（前缀 APP_）
-cfg, err := cfgm.Load(DefaultConfig())
+// LoadCmd 自动使用命令名作为环境变量前缀
+cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "app")
 
 // 自定义环境变量前缀
 cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithEnvPrefix("APP_"),
+    cfgm.WithEnvPrefix("CUSTOM_"),
 )
 
 // 完整示例：配置文件 + 环境变量 + CLI flags
@@ -196,7 +196,31 @@ func TestClientCommandCoversConfigFlags(t *testing.T) {
 
 ### 3. 环境变量
 
-#### 前缀匹配（默认 `APP_`，可用 WithEnvPrefix 覆盖）
+#### LoadCmd 自动使用命令名作为前缀
+
+`LoadCmd` 会自动将根命令名转换为大写并作为环境变量前缀：
+
+| 根命令名   | 环境变量前缀 |
+| ---------- | ------------ |
+| `app`      | `APP_`       |
+| `app-name` | `APP_NAME_`  |
+| `my-tool`  | `MY_TOOL_`   |
+
+使用 `WithEnvPrefix` 可覆盖默认行为：
+
+```go
+// 自定义前缀
+cfg, err := cfgm.Load(DefaultConfig(),
+    cfgm.WithEnvPrefix("CUSTOM_"),
+)
+
+// 禁用环境变量绑定
+cfg, err := cfgm.Load(DefaultConfig(),
+    cfgm.WithEnvPrefix(""),
+)
+```
+
+#### 环境变量命名规则
 
 | 环境变量                   | 配置 key               |
 | -------------------------- | ---------------------- |
@@ -211,12 +235,7 @@ func TestClientCommandCoversConfigFlags(t *testing.T) {
 2. 点号 `.` 与连字符 `-` 转为下划线 `_`
 3. 转为大写
 
-**注意**：
-
-- 默认前缀是 `APP_`
-- 可通过 `cfgm.WithEnvPrefix("APP_")` 覆盖默认前缀
-- 可通过 `cfgm.WithEnvPrefix("")` 显式禁用环境变量前缀绑定
-- 通过反射自动生成配置 key 绑定，只匹配结构体中声明的 key（包括包含连字符的 key）
+通过反射自动生成配置 key 绑定，只匹配结构体中声明的 key（包括包含连字符的 key）。
 
 ### 4. 测试驱动的配置管理
 
