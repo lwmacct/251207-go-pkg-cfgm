@@ -49,7 +49,7 @@
 // [WithAppName] 会生成默认搜索路径（见 [DefaultPaths]）：
 //   - .app.yaml (当前目录)
 //   - ~/.app.yaml (用户主目录)
-//   - /etc/myapp/config.yaml (系统配置)
+//   - /etc/app/config.yaml (系统配置)
 //   - config.yaml, config/config.yaml (通用路径)
 //
 // 如需自定义路径，使用 [WithConfigPaths]：

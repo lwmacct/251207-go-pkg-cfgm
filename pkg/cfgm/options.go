@@ -41,7 +41,7 @@ func ConfigFlag() cli.Flag {
 // --env-prefix / -e 指定的前缀，并使用它覆盖 [WithEnvPrefix] 设置的值。
 // 该 flag 不会映射到配置结构体字段。
 //
-// 未设置时使用命令名转换后的前缀（如 myapp → MYAPP_，my-app → MY_APP_）。
+// 未设置时使用命令名转换后的前缀（如 app → APP_，app-name → APP_NAME_）。
 // 显式设置空字符串可禁用环境变量绑定。
 func EnvPrefixFlag() cli.Flag {
 	return &cli.StringFlag{
@@ -81,7 +81,7 @@ func WithIgnoredCLIFlags(names ...string) Option {
 // 示例：
 //
 //	cfgm.Load(defaultConfig,
-//	    cfgm.WithAppName("myapp"),  // 自动搜索 .myapp.yaml 等
+//	    cfgm.WithAppName("app"),  // 自动搜索 .app.yaml 等
 //	    cfgm.WithCommand(cmd),
 //	)
 func WithAppName(name string) Option {

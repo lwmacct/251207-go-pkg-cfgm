@@ -228,7 +228,7 @@ func expandTemplateValues(value any) (any, error) {
 // 示例：
 //
 //	// 使用命令名自动生成前缀
-//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp")
+//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "app")
 //
 //	// 不带应用名
 //	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "")
@@ -251,7 +251,7 @@ func LoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...O
 // 示例：
 //
 //	cfg := cfgm.MustLoad(DefaultConfig(),
-//	    cfgm.WithAppName("myapp"),
+//	    cfgm.WithAppName("app"),
 //	    cfgm.WithEnvPrefix("APP_"),
 //	)
 func MustLoad[T any](defaultConfig T, opts ...Option) *T {
@@ -267,7 +267,7 @@ func MustLoad[T any](defaultConfig T, opts ...Option) *T {
 //
 // 示例：
 //
-//	cfg := cfgm.MustLoadCmd(cmd, DefaultConfig(), "myapp")
+//	cfg := cfgm.MustLoadCmd(cmd, DefaultConfig(), "app")
 func MustLoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...Option) *T {
 	baseOpts := cmdOptions(cmd)
 	if appName != "" {

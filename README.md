@@ -88,9 +88,9 @@ func Load(opts ...cfgm.Option) (*Config, error) {
 // 使用默认值 + 默认配置文件路径 (config.yaml, config/config.yaml)
 cfg, err := cfgm.Load(DefaultConfig())
 
-// 使用应用专属配置文件路径 (.myapp.yaml, ~/.myapp.yaml, /etc/myapp/config.yaml 等)
+// 使用应用专属配置文件路径 (.app.yaml, ~/.app.yaml, /etc/app/config.yaml 等)
 cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithAppName("myapp"),
+    cfgm.WithAppName("app"),
 )
 
 // 默认启用环境变量（前缀 APP_）
@@ -98,25 +98,25 @@ cfg, err := cfgm.Load(DefaultConfig())
 
 // 自定义环境变量前缀
 cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithEnvPrefix("MYAPP_"),
+    cfgm.WithEnvPrefix("APP_"),
 )
 
 // 完整示例：配置文件 + 环境变量 + CLI flags
 cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithConfigPaths("config.yaml", "/etc/myapp/config.yaml"),
-    cfgm.WithEnvPrefix("MYAPP_"),
+    cfgm.WithConfigPaths("config.yaml", "/etc/app/config.yaml"),
+    cfgm.WithEnvPrefix("APP_"),
     cfgm.WithCommand(cmd),
 )
 
 // CLI 场景推荐使用 LoadCmd，并在根命令挂载 cfgm.ConfigFlag()
 app := &cli.Command{
-    Name:  "myapp",
+    Name:  "app",
     Flags: []cli.Flag{cfgm.ConfigFlag()},
     Commands: []*cli.Command{
         {
             Name: "server",
             Action: func(ctx context.Context, cmd *cli.Command) error {
-                cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp")
+                cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "app")
                 if err != nil {
                     return err
                 }
@@ -131,8 +131,8 @@ app := &cli.Command{
 指定配置文件路径：
 
 ```bash
-myapp --config ./config.yaml server
-myapp -c ./config.yaml server
+app --config ./config.yaml server
+app -c ./config.yaml server
 ```
 
 `--config` 指定的路径会作为唯一配置文件搜索路径；未指定时使用 `WithAppName` / 默认路径规则。
@@ -169,7 +169,7 @@ flag := &cli.StringFlag{
 cfg, err := cfgm.LoadCmd(
     cmd,
     DefaultConfig(),
-    "myapp",
+    "app",
     cfgm.WithIgnoredCLIFlags("host", "dry-run", "format"),
 )
 ```
@@ -198,23 +198,23 @@ func TestClientCommandCoversConfigFlags(t *testing.T) {
 
 #### 前缀匹配（默认 `APP_`，可用 WithEnvPrefix 覆盖）
 
-| 环境变量                     | 配置 key               |
-| ---------------------------- | ---------------------- |
-| `MYAPP_SERVER_ADDR`          | `server.addr`          |
-| `MYAPP_SERVER_TIMEOUT`       | `server.timeout`       |
-| `MYAPP_DEBUG`                | `debug`                |
-| `MYAPP_CLIENT_REV_AUTH_USER` | `client.rev-auth-user` |
+| 环境变量                   | 配置 key               |
+| -------------------------- | ---------------------- |
+| `APP_SERVER_ADDR`          | `server.addr`          |
+| `APP_SERVER_TIMEOUT`       | `server.timeout`       |
+| `APP_DEBUG`                | `debug`                |
+| `APP_CLIENT_REV_AUTH_USER` | `client.rev-auth-user` |
 
 转换规则：
 
-1. 移除前缀（如 `MYAPP_`）
+1. 移除前缀（如 `APP_`）
 2. 点号 `.` 与连字符 `-` 转为下划线 `_`
 3. 转为大写
 
 **注意**：
 
 - 默认前缀是 `APP_`
-- 可通过 `cfgm.WithEnvPrefix("MYAPP_")` 覆盖默认前缀
+- 可通过 `cfgm.WithEnvPrefix("APP_")` 覆盖默认前缀
 - 可通过 `cfgm.WithEnvPrefix("")` 显式禁用环境变量前缀绑定
 - 通过反射自动生成配置 key 绑定，只匹配结构体中声明的 key（包括包含连字符的 key）
 

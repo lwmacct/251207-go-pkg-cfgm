@@ -16,7 +16,7 @@ func Example_defaultPaths() {
 	fmt.Println("基础路径数量:", len(paths))
 
 	// 指定应用名称时，会包含应用专属配置路径
-	paths = cfgm.DefaultPaths("myapp")
+	paths = cfgm.DefaultPaths("app")
 	fmt.Println("带应用名路径数量:", len(paths))
 
 	// Output:
@@ -238,9 +238,9 @@ func Example_withAppName() {
 	}
 
 	// 使用 WithAppName 设置应用名称
-	// 会自动搜索 .myapp.yaml, ~/.myapp.yaml, /etc/myapp/config.yaml 等路径
+	// 会自动搜索 .app.yaml, ~/.app.yaml, /etc/app/config.yaml 等路径
 	cfg, err := cfgm.Load(defaultCfg,
-		cfgm.WithAppName("myapp"),
+		cfgm.WithAppName("app"),
 	)
 	if err != nil {
 		fmt.Println("加载失败:", err)
