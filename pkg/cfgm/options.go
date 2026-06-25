@@ -3,6 +3,7 @@ package cfgm
 import "github.com/urfave/cli/v3"
 
 const configFlagName = "config"
+const envPrefixFlagName = "env-prefix"
 
 // options 配置加载选项。
 type options struct {
@@ -31,6 +32,22 @@ func ConfigFlag() cli.Flag {
 		Name:    configFlagName,
 		Aliases: []string{"c"},
 		Usage:   "配置文件路径",
+	}
+}
+
+// EnvPrefixFlag 返回 cfgm 识别的环境变量前缀 CLI flag。
+//
+// 将该 flag 挂到根命令或子命令后，[LoadCmd] / [MustLoadCmd] 会自动读取
+// --env-prefix / -e 指定的前缀，并使用它覆盖 [WithEnvPrefix] 设置的值。
+// 该 flag 不会映射到配置结构体字段。
+//
+// 默认值为 "APP_"；显式设置空字符串可禁用环境变量绑定。
+func EnvPrefixFlag() cli.Flag {
+	return &cli.StringFlag{
+		Name:    envPrefixFlagName,
+		Aliases: []string{"e"},
+		Value:   "APP_",
+		Usage:   "环境变量前缀（默认：APP_；空字符串禁用环境变量绑定）",
 	}
 }
 

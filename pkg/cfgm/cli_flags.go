@@ -296,7 +296,8 @@ func hasAnyFlag(visibleFlags map[string]bool, names []string) bool {
 func isFrameworkFlag(flag cli.Flag) bool {
 	for _, name := range flag.Names() {
 		if name == "help" || name == "h" || name == "version" || name == "v" ||
-			name == configFlagName || name == "c" {
+			name == configFlagName || name == "c" ||
+			name == envPrefixFlagName || name == "e" {
 			return true
 		}
 	}

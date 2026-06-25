@@ -244,7 +244,8 @@ func LoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts ...O
 	if appName != "" {
 		baseOpts = append(baseOpts, WithAppName(appName))
 	}
-	return load(defaultConfig, 1, append(baseOpts, opts...)...)
+	// CLI flag 选项放在最后，确保它们覆盖代码中传入的选项
+	return load(defaultConfig, 1, append(opts, baseOpts...)...)
 }
 
 // MustLoad 调用 [Load] 并在失败时 panic，适合启动阶段。
@@ -276,7 +277,8 @@ func MustLoadCmd[T any](cmd *cli.Command, defaultConfig T, appName string, opts 
 	if appName != "" {
 		baseOpts = append(baseOpts, WithAppName(appName))
 	}
-	cfg, err := load(defaultConfig, 2, append(baseOpts, opts...)...)
+	// CLI flag 选项放在最后，确保它们覆盖代码中传入的选项
+	cfg, err := load(defaultConfig, 2, append(opts, baseOpts...)...)
 	if err != nil {
 		panic(fmt.Sprintf("cfgm: failed to load config: %v", err))
 	}
@@ -288,6 +290,12 @@ func cmdOptions(cmd *cli.Command) []Option {
 	opts := []Option{WithCommand(cmd)}
 	if configPath := commandConfigPath(cmd); configPath != "" {
 		opts = append(opts, WithConfigPaths(configPath))
+	}
+	// CLI flag 优先级高于 WithEnvPrefix() 选项
+	if isSet := cmdIsSet(cmd, envPrefixFlagName); isSet {
+		envPrefix := commandEnvPrefix(cmd)
+		slog.Debug("cmdOptions: env-prefix flag is set", "value", envPrefix)
+		opts = append(opts, WithEnvPrefix(envPrefix))
 	}
 
 	return opts
@@ -305,6 +313,33 @@ func commandConfigPath(cmd *cli.Command) string {
 	}
 
 	return ""
+}
+
+// commandEnvPrefix 从命令链获取环境变量前缀。
+// 遍历命令链，返回首个显式设置的 --env-prefix 值。
+func commandEnvPrefix(cmd *cli.Command) string {
+	if cmd == nil {
+		return ""
+	}
+	for _, command := range cmd.Lineage() {
+		if command.IsSet(envPrefixFlagName) {
+			return command.String(envPrefixFlagName)
+		}
+	}
+	return ""
+}
+
+// cmdIsSet 检查命令链上是否显式设置了指定 flag（包括空字符串）。
+func cmdIsSet(cmd *cli.Command, flagName string) bool {
+	if cmd == nil {
+		return false
+	}
+	for _, command := range cmd.Lineage() {
+		if command.IsSet(flagName) {
+			return true
+		}
+	}
+	return false
 }
 
 // collectConfigKeys 递归收集配置结构体的 key 列表。

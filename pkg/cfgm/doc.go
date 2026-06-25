@@ -24,11 +24,14 @@
 //
 //	app := &cli.Command{
 //	    Name:  "myapp",
-//	    Flags: []cli.Flag{cfgm.ConfigFlag()}, // 支持 --config / -c
+//	    Flags: []cli.Flag{
+//	        cfgm.ConfigFlag(),  // 支持 --config / -c
+//	        cfgm.EnvPrefixFlag(), // 支持 --env-prefix / -e
+//	    },
 //	}
 //
 //	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp",
-//	    cfgm.WithEnvPrefix("MYAPP_"), // 可选；不传时默认使用 APP_
+//	    cfgm.WithEnvPrefix("MYAPP_"), // 可选；会被 CLI flag 覆盖
 //	)
 //
 // 或使用 Load 组合选项：
@@ -83,6 +86,25 @@
 //   - MYAPP_DEBUG → debug
 //   - MYAPP_SERVER_URL → server.url
 //   - MYAPP_CLIENT_REV_AUTH_USER → client.rev-auth-user
+//
+// # 环境变量前缀 CLI flag
+//
+// [EnvPrefixFlag] 提供全局 CLI flag --env-prefix / -e，用于在运行时覆盖环境变量前缀。
+// 优先级：CLI flag > [WithEnvPrefix] 选项 > 默认值 "APP_"。
+//
+// 示例：
+//
+//	myapp --env-prefix CUSTOM_        // 使用 CUSTOM_ 前缀
+//	myapp --env-prefix ""             // 禁用环境变量绑定
+//	myapp -e PROD_                    // 使用短别名
+//
+// CLI 场景可将 [EnvPrefixFlag] 挂到根命令或子命令：
+//
+//	cmd := &cli.Command{
+//	    Flags: []cli.Flag{cfgm.EnvPrefixFlag()},
+//	}
+//
+// [LoadCmd] / [MustLoadCmd] 会自动读取命令链上的 --env-prefix / -e。
 //
 // # 模板展开
 //

@@ -735,6 +735,137 @@ func TestLoadCmdUsesConfigFlagFromCommandLineage(t *testing.T) {
 	assert.Equal(t, "from-config-flag", loadedCfg.Name)
 }
 
+func TestLoadCmdWithEnvPrefixFlag(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	t.Setenv("APP_NAME", "from-app")
+	t.Setenv("CUSTOM_NAME", "from-custom")
+
+	defaultCfg := Config{Name: "default"}
+	var loadedCfg *Config
+
+	cmd := &cli.Command{
+		Name:  "test",
+		Flags: []cli.Flag{EnvPrefixFlag()},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := LoadCmd(cmd, defaultCfg, "", WithEnvPrefix("APP_"))
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+			return nil
+		},
+	}
+
+	// 使用 --env-prefix CUSTOM_ 覆盖 WithEnvPrefix
+	err := cmd.Run(context.Background(), []string{"test", "--env-prefix", "CUSTOM_"})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+
+	assert.Equal(t, "from-custom", loadedCfg.Name, "CLI flag should override WithEnvPrefix")
+}
+
+func TestLoadCmdWithEnvPrefixFlagEmpty(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	t.Setenv("APP_NAME", "from-app")
+
+	defaultCfg := Config{Name: "default"}
+	var loadedCfg *Config
+
+	cmd := &cli.Command{
+		Name:  "test",
+		Flags: []cli.Flag{EnvPrefixFlag()},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := LoadCmd(cmd, defaultCfg, "", WithEnvPrefix("APP_"))
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+			return nil
+		},
+	}
+
+	// 使用 --env-prefix "" 禁用环境变量
+	err := cmd.Run(context.Background(), []string{"test", "--env-prefix", ""})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+
+	assert.Equal(t, "default", loadedCfg.Name, "empty flag should disable env binding")
+}
+
+func TestLoadCmdWithEnvPrefixFlagFromLineage(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	t.Setenv("APP_NAME", "from-app")
+	t.Setenv("CUSTOM_NAME", "from-custom")
+
+	defaultCfg := Config{Name: "default"}
+	var loadedCfg *Config
+
+	subCmd := &cli.Command{
+		Name: "serve",
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := LoadCmd(cmd, defaultCfg, "", WithEnvPrefix("APP_"))
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+			return nil
+		},
+	}
+	rootCmd := &cli.Command{
+		Name:     "app",
+		Flags:    []cli.Flag{EnvPrefixFlag()},
+		Commands: []*cli.Command{subCmd},
+	}
+
+	// 父命令设置 --env-prefix，子命令应继承
+	err := rootCmd.Run(context.Background(), []string{"app", "--env-prefix", "CUSTOM_", "serve"})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+
+	assert.Equal(t, "from-custom", loadedCfg.Name, "child command should inherit parent flag")
+}
+
+func TestLoadCmdEnvPrefixFlagPriority(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	t.Setenv("APP_NAME", "from-app")
+	t.Setenv("CUSTOM_NAME", "from-custom")
+
+	defaultCfg := Config{Name: "default"}
+	var loadedCfg *Config
+
+	cmd := &cli.Command{
+		Name:  "test",
+		Flags: []cli.Flag{EnvPrefixFlag()},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := LoadCmd(cmd, defaultCfg, "")
+			if err != nil {
+				return err
+			}
+			loadedCfg = cfg
+			return nil
+		},
+	}
+
+	// 不设置 CLI flag，应使用默认值 APP_
+	err := cmd.Run(context.Background(), []string{"test"})
+	require.NoError(t, err)
+	require.NotNil(t, loadedCfg)
+
+	assert.Equal(t, "from-app", loadedCfg.Name, "should use default APP_ prefix when no flag set")
+}
+
 func TestLoadWithCommand_FullPathDisambiguatesNestedFlags(t *testing.T) {
 	type EndpointConfig struct {
 		Addr string `json:"addr"`

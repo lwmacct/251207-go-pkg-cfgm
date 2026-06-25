@@ -18,6 +18,7 @@ func main() {
 		Usage: "配置管理工具",
 		Flags: []cli.Flag{
 			cfgm.ConfigFlag(),
+			cfgm.EnvPrefixFlag(),
 		},
 		Commands: []*cli.Command{
 			client.Command,
