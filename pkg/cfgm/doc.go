@@ -7,7 +7,7 @@
 //
 //  1. 默认值 - 通过 defaultConfig 参数传入
 //  2. 配置文件 - 通过 [WithConfigPaths] 或 [WithAppName] 设置
-//  3. 环境变量(前缀) - 默认使用 APP_，可通过 [WithEnvPrefix] 覆盖或禁用
+//  3. 环境变量 - 使用命令名或 [WithEnvPrefix] 设置
 //  4. CLI flags - 通过 [WithCommand] 选项设置，最高优先级
 //
 // # 快速开始
@@ -30,9 +30,8 @@
 //	    },
 //	}
 //
-//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp",
-//	    cfgm.WithEnvPrefix("MYAPP_"), // 可选；会被 CLI flag 覆盖
-//	)
+//	// 自动使用命令名 "myapp" → 前缀 "MYAPP_"
+//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "myapp")
 //
 // 或使用 Load 组合选项：
 //
@@ -42,7 +41,6 @@
 //	    Timeout: 30 * time.Second,
 //	},
 //	    cfgm.WithAppName("myapp"),
-//	    cfgm.WithEnvPrefix("MYAPP_"),
 //	    cfgm.WithCommand(cmd),
 //	)
 //
@@ -85,7 +83,7 @@
 //   - 前缀 + 大写的配置 key
 //   - 点号 (.) 和连字符 (-) 转为下划线 (_)
 //
-// 示例 (前缀为 "MYAPP_")：
+// 示例：
 //   - MYAPP_DEBUG → debug
 //   - MYAPP_SERVER_URL → server.url
 //   - MYAPP_CLIENT_REV_AUTH_USER → client.rev-auth-user
