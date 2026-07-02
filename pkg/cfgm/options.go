@@ -1,6 +1,10 @@
 package cfgm
 
-import "github.com/urfave/cli/v3"
+import (
+	"log/slog"
+
+	"github.com/urfave/cli/v3"
+)
 
 const configFlagName = "config"
 const envPrefixFlagName = "env-prefix"
@@ -17,6 +21,7 @@ type options struct {
 	ignoredCLIFlags     map[string]bool
 	noTemplateExpansion bool // 是否禁用配置模板展开（默认启用）
 	callerSkip          int  // FindProjectRoot 的调用栈跳过层数（0 表示使用默认值）
+	logger              *slog.Logger
 }
 
 // Option 配置加载选项函数。
@@ -153,6 +158,15 @@ func WithEnvPrefix(prefix string) Option {
 	return func(o *options) {
 		o.envPrefix = prefix
 		o.envPrefixSet = true
+	}
+}
+
+// WithLogger 设置 cfgm 内部调试日志使用的 slog logger。
+//
+// 未设置时使用 [slog.Default]。传入 nil 等同于未设置。
+func WithLogger(logger *slog.Logger) Option {
+	return func(o *options) {
+		o.logger = logger
 	}
 }
 

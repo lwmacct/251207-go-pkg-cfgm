@@ -68,6 +68,9 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 	for _, opt := range opts {
 		opt(options)
 	}
+	if options.logger == nil {
+		options.logger = slog.Default()
+	}
 
 	// 如果用户显式设置了 callerSkip，则优先使用
 	if options.callerSkip > 0 {
@@ -137,25 +140,25 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 		}
 		mergeMaps(configMap, fileMap)
 
-		slog.Debug("Loaded config from file", "path", path, "templateExpansion", !options.noTemplateExpansion)
+		options.logger.Debug("Loaded config from file", "path", path, "templateExpansion", !options.noTemplateExpansion)
 		configLoaded = true
 
 		break
 	}
 
 	if len(options.configPaths) > 0 && !configLoaded {
-		slog.Debug("No config file found, using defaults")
+		options.logger.Debug("No config file found, using defaults")
 	}
 
 	// 3️⃣ 自动生成环境变量绑定 (基于配置结构体的 key)
 	// 支持包含连字符的 key，例如 rev-auth-user
 	if options.envPrefix != "" {
 		autoBindings := generateEnvBindings(options.envPrefix, collectConfigKeys(defaultConfig))
-		slog.Debug("Generated auto env bindings", "prefix", options.envPrefix, "count", len(autoBindings))
+		options.logger.Debug("Generated auto env bindings", "prefix", options.envPrefix, "count", len(autoBindings))
 		for envKey, configPath := range autoBindings {
 			if val := os.Getenv(envKey); val != "" {
 				setByPath(configMap, configPath, val)
-				slog.Debug("Loaded env binding", "env", envKey, "path", configPath)
+				options.logger.Debug("Loaded env binding", "env", envKey, "path", configPath)
 			}
 		}
 	}

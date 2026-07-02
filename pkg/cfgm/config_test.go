@@ -1,7 +1,9 @@
 package cfgm
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -216,6 +218,30 @@ func TestLoadWithNonExistentConfigFile(t *testing.T) {
 	cfg, err := Load(Config{Name: "fallback-app"}, WithConfigPaths("/nonexistent/path/config.yaml"))
 	require.NoError(t, err)
 	assert.Equal(t, "fallback-app", cfg.Name)
+}
+
+func TestLoadWithLogger(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tmpFile := writeTempConfig(t, `name: "from-file"`)
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	cfg, err := Load(
+		Config{Name: "default"},
+		WithConfigPaths(tmpFile),
+		WithEnvPrefix(""),
+		WithLogger(logger),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-file", cfg.Name)
+	assert.Contains(t, buf.String(), "msg=\"Loaded config from file\"")
+	assert.Contains(t, buf.String(), "path="+tmpFile)
 }
 
 // TestLoadWithConfigFileOnly 测试纯配置文件读取 (cmd=nil, 无环境变量)。
