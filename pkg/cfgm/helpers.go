@@ -42,6 +42,14 @@ func isStructType(typ reflect.Type) bool {
 	return typ.Kind() == reflect.Struct && typ != durationType && typ != timeType
 }
 
+func isMapType(typ reflect.Type) bool {
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+
+	return typ.Kind() == reflect.Map
+}
+
 func structToMap(cfg any) map[string]any {
 	val := reflect.ValueOf(cfg)
 	return structValueToMap(val, val.Type())

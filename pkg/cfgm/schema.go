@@ -3,6 +3,7 @@ package cfgm
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // ConfigSchema 提供配置结构体的派生元数据。
@@ -11,6 +12,13 @@ import (
 // 获取 flag Usage，避免配置示例注释与 CLI help 文案重复维护。
 type ConfigSchema struct {
 	index *cliConfigIndex
+}
+
+// Field describes one leaf config field derived from a struct.
+type Field struct {
+	Path string
+	Type reflect.Type
+	Desc string
 }
 
 // CommandSchema 提供指定命令链下的配置元数据投影。
@@ -24,6 +32,24 @@ func Schema[T any](defaultConfig T) ConfigSchema {
 	return ConfigSchema{
 		index: newCLIConfigIndex(reflect.TypeOf(defaultConfig)),
 	}
+}
+
+// Fields returns the leaf fields in the config schema.
+func (s ConfigSchema) Fields() []Field {
+	if s.index == nil {
+		return nil
+	}
+
+	fields := make([]Field, 0, len(s.index.fields))
+	for _, field := range s.index.fields {
+		fields = append(fields, Field{
+			Path: field.configPath,
+			Type: field.fieldType,
+			Desc: field.desc,
+		})
+	}
+
+	return fields
 }
 
 // Command 返回指定命令链下的元数据投影。
@@ -41,6 +67,37 @@ func (s ConfigSchema) Command(names ...string) CommandSchema {
 		fields: fields,
 		err:    err,
 	}
+}
+
+func (s ConfigSchema) validateKeys(keys []string) error {
+	var unknown []string
+	for _, key := range keys {
+		if key == "" || s.hasPath(key) {
+			continue
+		}
+		unknown = append(unknown, key)
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("unknown config keys:\n  - %s", strings.Join(unknown, "\n  - "))
+}
+
+func (s ConfigSchema) hasPath(path string) bool {
+	if s.index == nil {
+		return false
+	}
+	for _, field := range s.index.fields {
+		if path == field.configPath {
+			return true
+		}
+		if isMapType(field.fieldType) && strings.HasPrefix(path, field.configPath+".") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Usage 返回 flagName 对应配置字段的 desc tag。

@@ -1,6 +1,7 @@
 package cfgm
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,8 +11,6 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
-
-	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
 )
 
 // DefaultPaths 返回默认配置文件的搜索顺序。
@@ -98,15 +97,6 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 		}
 	}
 
-	configMap := structToMap(defaultConfig)
-	if !options.noTemplateExpansion {
-		if _, err := expandTemplateValues(configMap); err != nil {
-			return nil, fmt.Errorf("expand template in defaults: %w", err)
-		}
-	}
-
-	// 2️⃣ 加载配置文件 (按顺序搜索，找到第一个即停止)
-	configLoaded := false
 	paths := options.configPaths
 	if options.baseDir != "" {
 		paths = make([]string, len(options.configPaths))
@@ -118,99 +108,29 @@ func load[T any](defaultConfig T, callerSkip int, opts ...Option) (*T, error) {
 			}
 		}
 	}
-	for _, path := range paths {
-		// 尝试读取配置文件
-		content, err := os.ReadFile(path) //nolint:gosec // path is from trusted config
-		if err != nil {
-			continue // 文件不存在或无法读取，尝试下一个路径
-		}
 
-		// 默认启用模板展开，在解析前处理模板
-		if !options.noTemplateExpansion {
-			expanded, expandErr := templexp.ExpandTemplate(string(content))
-			if expandErr != nil {
-				return nil, fmt.Errorf("expand template in %s: %w", path, expandErr)
-			}
-			content = []byte(expanded)
-		}
-
-		fileMap, err := parseConfigBytes(path, content)
-		if err != nil {
-			return nil, fmt.Errorf("parse config file %s: %w", path, err)
-		}
-		mergeMaps(configMap, fileMap)
-
-		options.logger.Debug("Loaded config from file", "path", path, "templateExpansion", !options.noTemplateExpansion)
-		configLoaded = true
-
-		break
+	loader := New(defaultConfig).
+		WithLogger(options.logger).
+		AllowUnknownKeys()
+	if !options.noTemplateExpansion {
+		loader.ExpandDefaults()
+		loader.Add(Files(paths, Optional(), ExpandTemplates()))
+	} else {
+		loader.Add(Files(paths, Optional()))
 	}
-
-	if len(options.configPaths) > 0 && !configLoaded {
-		options.logger.Debug("No config file found, using defaults")
-	}
-
-	// 3️⃣ 自动生成环境变量绑定 (基于配置结构体的 key)
-	// 支持包含连字符的 key，例如 rev-auth-user
 	if options.envPrefix != "" {
-		autoBindings := generateEnvBindings(options.envPrefix, collectConfigKeys(defaultConfig))
-		options.logger.Debug("Generated auto env bindings", "prefix", options.envPrefix, "count", len(autoBindings))
-		for envKey, configPath := range autoBindings {
-			if val := os.Getenv(envKey); val != "" {
-				setByPath(configMap, configPath, val)
-				options.logger.Debug("Loaded env binding", "env", envKey, "path", configPath)
-			}
-		}
+		loader.Add(Env(options.envPrefix))
 	}
-
-	// 4️⃣ 加载 CLI flags (最高优先级，仅当用户明确指定时)
 	if options.cmd != nil {
-		if err := applyCLIFlagsGeneric(options.cmd, configMap, defaultConfig, options.ignoredCLIFlags); err != nil {
-			return nil, err
-		}
+		loader.Add(legacyCLI(options.cmd, options.ignoredCLIFlags))
 	}
 
-	// 解析到结构体
-	var cfg T
-	if err := decodeConfigMap(configMap, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	cfg, _, err := loader.Load(context.Background())
+	if err != nil {
+		return nil, err
 	}
 
-	return &cfg, nil
-}
-
-func expandTemplateValues(value any) (any, error) {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, item := range typed {
-			expanded, err := expandTemplateValues(item)
-			if err != nil {
-				return nil, err
-			}
-			typed[key] = expanded
-		}
-		return typed, nil
-	case []any:
-		for i, item := range typed {
-			expanded, err := expandTemplateValues(item)
-			if err != nil {
-				return nil, err
-			}
-			typed[i] = expanded
-		}
-		return typed, nil
-	case string:
-		if !strings.Contains(typed, "$") {
-			return typed, nil
-		}
-		expanded, err := templexp.ExpandTemplate(typed)
-		if err != nil {
-			return nil, err
-		}
-		return expanded, nil
-	default:
-		return value, nil
-	}
+	return cfg, nil
 }
 
 // LoadCmd 是 [Load] 的便捷版本，适用于 CLI 场景。
@@ -473,17 +393,17 @@ func applyCLIFlagsGeneric[T any](cmd *cli.Command, config map[string]any, defaul
 }
 
 // setCLIFlagValue 按字段类型读取 CLI 值并写入配置 map。
-func setCLIFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFlag string, fieldType reflect.Type) {
+func setCLIFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFlag string, fieldType reflect.Type) bool {
 	// 先检查特殊类型 (time.Duration, time.Time)
 	switch fieldType {
 	case reflect.TypeFor[time.Duration]():
 		setByPath(config, configPath, cmd.Duration(cliFlag))
 
-		return
+		return true
 	case reflect.TypeFor[time.Time]():
 		setByPath(config, configPath, cmd.Timestamp(cliFlag))
 
-		return
+		return true
 	}
 
 	// 处理基本类型和切片
@@ -491,90 +411,119 @@ func setCLIFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFla
 	// 字符串
 	case reflect.String:
 		setByPath(config, configPath, cmd.String(cliFlag))
+		return true
 
 	// 布尔
 	case reflect.Bool:
 		setByPath(config, configPath, cmd.Bool(cliFlag))
+		return true
 
 	// 有符号整数
 	case reflect.Int:
 		setByPath(config, configPath, cmd.Int(cliFlag))
+		return true
 	case reflect.Int8:
 		setByPath(config, configPath, cmd.Int8(cliFlag))
+		return true
 	case reflect.Int16:
 		setByPath(config, configPath, cmd.Int16(cliFlag))
+		return true
 	case reflect.Int32:
 		setByPath(config, configPath, cmd.Int32(cliFlag))
+		return true
 	case reflect.Int64:
 		setByPath(config, configPath, cmd.Int64(cliFlag))
+		return true
 
 	// 无符号整数
 	case reflect.Uint:
 		setByPath(config, configPath, cmd.Uint(cliFlag))
+		return true
 	case reflect.Uint8:
 		setByPath(config, configPath, uint8(cmd.Uint(cliFlag))) //nolint:gosec // CLI value expected to be in uint8 range
+		return true
 	case reflect.Uint16:
 		setByPath(config, configPath, cmd.Uint16(cliFlag))
+		return true
 	case reflect.Uint32:
 		setByPath(config, configPath, cmd.Uint32(cliFlag))
+		return true
 	case reflect.Uint64:
 		setByPath(config, configPath, cmd.Uint64(cliFlag))
+		return true
 
 	// 浮点数
 	case reflect.Float32:
 		setByPath(config, configPath, cmd.Float32(cliFlag))
+		return true
 	case reflect.Float64:
 		setByPath(config, configPath, cmd.Float64(cliFlag))
+		return true
 
 	// 切片类型
 	case reflect.Slice:
-		setSliceFlagValue(cmd, config, configPath, cliFlag, fieldType)
+		return setSliceFlagValue(cmd, config, configPath, cliFlag, fieldType)
 
 	// Map 类型
 	case reflect.Map:
-		if fieldType.Key().Kind() == reflect.String && fieldType.Elem().Kind() == reflect.String {
+		if isStringMapType(fieldType) {
 			setByPath(config, configPath, cmd.StringMap(cliFlag))
+			return true
 		}
 
 	default:
 		// 不支持的类型，忽略
 	}
+
+	return false
 }
 
 // setSliceFlagValue 处理切片类型的 CLI flag 值。
-func setSliceFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFlag string, fieldType reflect.Type) {
+func setSliceFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFlag string, fieldType reflect.Type) bool {
 	elemType := fieldType.Elem()
 
 	// 先检查特殊元素类型
 	if elemType == reflect.TypeFor[time.Time]() {
 		setByPath(config, configPath, cmd.TimestampArgs(cliFlag))
 
-		return
+		return true
 	}
 
 	switch elemType.Kind() {
 	case reflect.String:
 		setByPath(config, configPath, cmd.StringSlice(cliFlag))
+		return true
 	case reflect.Int:
 		setByPath(config, configPath, cmd.IntSlice(cliFlag))
+		return true
 	case reflect.Int8:
 		setByPath(config, configPath, cmd.Int8Slice(cliFlag))
+		return true
 	case reflect.Int16:
 		setByPath(config, configPath, cmd.Int16Slice(cliFlag))
+		return true
 	case reflect.Int32:
 		setByPath(config, configPath, cmd.Int32Slice(cliFlag))
+		return true
 	case reflect.Int64:
 		setByPath(config, configPath, cmd.Int64Slice(cliFlag))
+		return true
 	case reflect.Uint16:
 		setByPath(config, configPath, cmd.Uint16Slice(cliFlag))
+		return true
 	case reflect.Uint32:
 		setByPath(config, configPath, cmd.Uint32Slice(cliFlag))
+		return true
 	case reflect.Float32:
 		setByPath(config, configPath, cmd.Float32Slice(cliFlag))
+		return true
 	case reflect.Float64:
 		setByPath(config, configPath, cmd.Float64Slice(cliFlag))
+		return true
 
 	default:
 		// 不支持的切片元素类型，忽略
 	}
+
+	return false
 }

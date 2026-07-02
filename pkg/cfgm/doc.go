@@ -1,14 +1,17 @@
 // Package cfgm 提供通用的配置加载功能。
 //
-// 支持 YAML/JSON，按默认值、配置文件、环境变量与 CLI flags 逐层覆盖。
-// 配置 key 使用 json tag 统一描述，YAML 与 JSON 共享同一套 key。
+// 支持 YAML/JSON，配置 key 使用 json tag 统一描述，YAML 与 JSON 共享同一套 key。
+// 推荐使用显式 source pipeline：默认值作为最低优先级，随后按 Add 的顺序合并
+// File、Env、CLI 等来源，后添加的 source 覆盖先添加的 source。
 //
-// # 加载优先级 (从低到高)
+// # 加载模型
 //
 //  1. 默认值 - 通过 defaultConfig 参数传入
-//  2. 配置文件 - 通过 [WithConfigPaths] 或 [WithAppName] 设置
-//  3. 环境变量 - 使用命令名或 [WithEnvPrefix] 设置
-//  4. CLI flags - 通过 [WithCommand] 选项设置，最高优先级
+//  2. 显式 sources - 通过 [Loader.Add] 声明，声明顺序就是优先级
+//  3. 解码 - 将合并后的 map 解码回配置结构体
+//
+// 新 Loader 默认会校验 source 中的未知 key，避免配置文件字段拼写错误被静默忽略。
+// 如需保留宽松行为，可使用 [Loader.AllowUnknownKeys]。
 //
 // # 快速开始
 //
@@ -20,44 +23,26 @@
 //	    Timeout time.Duration `json:"timeout" desc:"超时时间"`
 //	}
 //
-// 推荐使用 LoadCmd：
+// 使用显式 source pipeline：
 //
-//	app := &cli.Command{
-//	    Name:  "app",
-//	    Flags: []cli.Flag{
-//	        cfgm.ConfigFlag(),  // 支持 --config / -c
-//	        cfgm.EnvPrefixFlag(), // 支持 --env-prefix / -e
-//	    },
-//	}
-//
-//	// 自动使用命令名 "app" → 前缀 "APP_"
-//	cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "app")
-//
-// 或使用 Load 组合选项：
-//
-//	cfg, err := cfgm.Load(Config{
+//	cfg, report, err := cfgm.New(Config{
 //	    Name:    "default",
 //	    Debug:   false,
 //	    Timeout: 30 * time.Second,
-//	},
-//	    cfgm.WithAppName("app"),
-//	    cfgm.WithCommand(cmd),
-//	)
+//	}).
+//	    Add(
+//	        cfgm.File("config/config.yaml", cfgm.Optional(), cfgm.ExpandTemplates()),
+//	        cfgm.Env("APP_"),
+//	        cfgm.CLI(cmd),
+//	    ).
+//	    Load(ctx)
+//
+// report 会记录每个 source 贡献的配置 key，便于排查最终值来源。
 //
 // # 配置文件路径
 //
-// [WithAppName] 会生成默认搜索路径（见 [DefaultPaths]）：
-//   - .app.yaml (当前目录)
-//   - ~/.app.yaml (用户主目录)
-//   - /etc/app/config.yaml (系统配置)
-//   - config.yaml, config/config.yaml (通用路径)
-//
-// 如需自定义路径，使用 [WithConfigPaths]：
-//
-//	cfgm.Load(config,
-//	    cfgm.WithAppName("app"),          // 仍可用于其他用途
-//	    cfgm.WithConfigPaths("custom.yaml"), // 覆盖默认路径
-//	)
+// [File] 加载单个配置文件，默认 required；使用 [Optional] 可允许文件不存在。
+// [Files] 会按顺序读取首个存在的文件。
 //
 // CLI 场景可将 [ConfigFlag] 挂到根命令或子命令：
 //
@@ -65,19 +50,13 @@
 //	    Flags: []cli.Flag{cfgm.ConfigFlag()},
 //	}
 //
-// [LoadCmd] / [MustLoadCmd] 会自动读取命令链上的 --config / -c：
+// 应用可自行读取命令链上的 --config / -c，并传给 [File]：
 //
 //	app --config ./config.yaml server
 //
-// 指定后，该路径会作为唯一配置文件搜索路径；未指定时使用 [WithAppName] / 默认路径规则。
-//
 // # 环境变量(前缀)
 //
-// 默认会使用命令名转换后的前缀生成环境变量绑定。
-// 转换规则：命令名转大写，连字符(-)转为下划线(_)，末尾添加下划线。
-// 例如：app → APP_, app-name → APP_NAME_。
-//
-// 调用 [WithEnvPrefix] 可覆盖默认前缀；传入空字符串可禁用该行为。
+// [Env] 根据配置 schema 自动生成环境变量绑定。
 //
 // 环境变量命名规则：
 //   - 前缀 + 大写的配置 key
@@ -88,29 +67,10 @@
 //   - APP_SERVER_URL → server.url
 //   - APP_CLIENT_REV_AUTH_USER → client.rev-auth-user
 //
-// # 环境变量前缀 CLI flag
-//
-// [EnvPrefixFlag] 提供全局 CLI flag --env-prefix / -e，用于在运行时覆盖环境变量前缀。
-// 优先级：CLI flag > [WithEnvPrefix] 选项 > 命令名前缀。
-//
-// 示例：
-//
-//	app --env-prefix CUSTOM_        // 使用 CUSTOM_ 前缀
-//	app --env-prefix ""             // 禁用环境变量绑定
-//	app -e PROD_                    // 使用短别名
-//
-// CLI 场景可将 [EnvPrefixFlag] 挂到根命令或子命令：
-//
-//	cmd := &cli.Command{
-//	    Flags: []cli.Flag{cfgm.EnvPrefixFlag()},
-//	}
-//
-// [LoadCmd] / [MustLoadCmd] 会自动读取命令链上的 --env-prefix / -e。
-//
 // # 模板展开
 //
-// 默认值与配置文件都会进行字符串展开（YAML/JSON 均支持）。
-// 使用 [WithoutTemplateExpansion] 可禁用该行为。
+// [ExpandTemplates] 可对配置文件执行 Shell 参数展开。
+// [Loader.ExpandDefaults] 可对 defaultConfig 中的字符串执行相同展开。
 //
 // 支持 Shell 参数展开：
 //   - 仅识别 ${...}（不解析 $VAR）

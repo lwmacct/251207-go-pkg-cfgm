@@ -240,8 +240,8 @@ func TestLoadWithLogger(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "from-file", cfg.Name)
-	assert.Contains(t, buf.String(), "msg=\"Loaded config from file\"")
-	assert.Contains(t, buf.String(), "path="+tmpFile)
+	assert.Contains(t, buf.String(), "msg=\"Loaded config source\"")
+	assert.Contains(t, buf.String(), "source=file:"+tmpFile)
 }
 
 // TestLoadWithConfigFileOnly 测试纯配置文件读取 (cmd=nil, 无环境变量)。

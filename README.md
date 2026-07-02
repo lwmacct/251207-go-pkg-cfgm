@@ -13,26 +13,27 @@
 
 ## Table of Contents
 
-- [特性](#特性) `:31+11`
-- [安装](#安装) `:42+6`
-- [快速开始](#快速开始) `:48+279`
-  - [1. 定义配置结构体](#1-定义配置结构体) `:50+36`
-  - [2. 加载配置](#2-加载配置) `:86+120`
-  - [3. 环境变量](#3-环境变量) `:206+43`
-  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:249+78`
-- [模板语法](#模板语法) `:327+44`
-  - [基本语法](#基本语法) `:335+16`
-  - [语义说明](#语义说明) `:351+7`
-  - [使用示例](#使用示例) `:358+13`
-- [License](#license) `:371+3`
+- [特性](#特性) `:31+12`
+- [安装](#安装) `:43+6`
+- [快速开始](#快速开始) `:49+289`
+  - [1. 定义配置结构体](#1-定义配置结构体) `:51+42`
+  - [2. 加载配置](#2-加载配置) `:93+124`
+  - [3. 环境变量](#3-环境变量) `:217+43`
+  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:260+78`
+- [模板语法](#模板语法) `:338+44`
+  - [基本语法](#基本语法) `:346+16`
+  - [语义说明](#语义说明) `:362+7`
+  - [使用示例](#使用示例) `:369+13`
+- [License](#license) `:382+3`
 
 <!--TOC-->
 
 ## 特性
 
 - **泛型支持**：适用于任意配置结构体
-- **多源合并**：默认值 → 配置文件 → 环境变量 → CLI flags（优先级递增）
-- **函数选项模式**：灵活配置，向后兼容
+- **显式来源管线**：默认值 → `File` → `Env` → `CLI`，source 顺序就是优先级
+- **加载报告**：返回每个 source 贡献的配置 key，便于排查配置来源
+- **严格校验**：默认拒绝配置文件中的未知 key，尽早发现拼写错误
 - **环境变量支持**：前缀匹配，适合 Docker/K8s 容器化部署
 - **自动映射**：CLI flag 名称自动从配置路径推导，递归移除命令链前缀并保留 `.` 层级
 - **示例生成**：自动根据结构体生成带注释的 YAML 配置示例
@@ -76,8 +77,14 @@ func DefaultConfig() Config {
     }
 }
 
-func Load(opts ...cfgm.Option) (*Config, error) {
-    return cfgm.Load(DefaultConfig(), opts...)
+func Load(ctx context.Context) (*Config, error) {
+    cfg, _, err := cfgm.New(DefaultConfig()).
+        Add(
+            cfgm.File("config/config.yaml", cfgm.Optional(), cfgm.ExpandTemplates()),
+            cfgm.Env("APP_"),
+        ).
+        Load(ctx)
+    return cfg, err
 }
 ```
 
@@ -86,38 +93,36 @@ func Load(opts ...cfgm.Option) (*Config, error) {
 ### 2. 加载配置
 
 ```go
-// 使用默认值 + 默认配置文件路径 (config.yaml, config/config.yaml)
-cfg, err := cfgm.Load(DefaultConfig())
-
-// 使用应用专属配置文件路径 (.app.yaml, ~/.app.yaml, /etc/app/config.yaml 等)
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithAppName("app"),
-)
-
-// LoadCmd 自动使用命令名作为环境变量前缀
-cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "app")
-
-// 自定义环境变量前缀
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithEnvPrefix("CUSTOM_"),
-)
-
-// 完整示例：配置文件 + 环境变量 + CLI flags
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithConfigPaths("config.yaml", "/etc/app/config.yaml"),
-    cfgm.WithEnvPrefix("APP_"),
-    cfgm.WithCommand(cmd),
-)
-
-// 可选：接入应用自己的 slog logger
 logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
     Level: slog.LevelDebug,
 }))
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithLogger(logger),
-)
 
-// CLI 场景推荐使用 LoadCmd，并在根命令挂载 cfgm.ConfigFlag()
+cfg, report, err := cfgm.New(DefaultConfig()).
+    WithLogger(logger).
+    Add(
+        // 默认 File 是 required；本地开发配置通常显式标记 Optional。
+        cfgm.File("config/config.yaml", cfgm.Optional(), cfgm.ExpandTemplates()),
+        cfgm.Env("APP_"),
+        cfgm.CLI(cmd, cfgm.IgnoreCLIFlags("dry-run", "format")),
+    ).
+    Load(context.Background())
+if err != nil {
+    return err
+}
+_ = report // report.Sources 记录每个 source 贡献的配置 key
+```
+
+source 按声明顺序合并，后面的 source 覆盖前面的 source。只想使用默认值时，不添加任何 source。
+
+```go
+cfg, report, err := cfgm.New(DefaultConfig()).Load(ctx)
+```
+
+旧的 `Load` / `LoadCmd` / `With...` 入口仍作为过渡包装存在，但新的主路径是显式 source pipeline。
+
+CLI 场景可在根命令挂载 cfgm.ConfigFlag()，再把当前命令作为 `cfgm.CLI(cmd)` source：
+
+```go
 app := &cli.Command{
     Name:  "app",
     Flags: []cli.Flag{cfgm.ConfigFlag()},
@@ -125,7 +130,13 @@ app := &cli.Command{
         {
             Name: "server",
             Action: func(ctx context.Context, cmd *cli.Command) error {
-                cfg, err := cfgm.LoadCmd(cmd, DefaultConfig(), "app")
+                cfg, _, err := cfgm.New(DefaultConfig()).
+                    Add(
+                        cfgm.File(cmd.String("config"), cfgm.Optional(), cfgm.ExpandTemplates()),
+                        cfgm.Env("APP_"),
+                        cfgm.CLI(cmd),
+                    ).
+                    Load(ctx)
                 if err != nil {
                     return err
                 }
