@@ -17,6 +17,13 @@ repos:
   - repo: https://github.com/lwmacct/251211-pre-commit
     rev: v1.0.2
     hooks:
-      - id: prettier
-      - id: mc-mdtoc
       - id: golangci-lint
+
+  - repo: local
+    hooks:
+      - id: update-markdown-toc
+        name: Update Markdown TOC
+        entry: bash -c 'fd -e md | mdtoc -i'
+        language: unsupported
+        always_run: true
+        pass_filenames: false

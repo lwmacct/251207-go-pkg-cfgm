@@ -11,23 +11,29 @@ import (
 
 // DefaultPaths returns conventional config file search paths.
 //
-// The paths are not used implicitly. Pass them explicitly with Files when an
-// application wants this convention.
+// Load adds these paths as an optional low-priority file source by default.
+// Pass an app name to include app-specific paths before generic paths. For each
+// location, paths are searched in .yaml, .yml, then .json order.
 func DefaultPaths(appName ...string) []string {
 	var paths []string
 
 	if len(appName) > 0 && appName[0] != "" {
 		name := appName[0]
-		paths = append(paths, "."+name+".yaml")
+		paths = appendConfigFormats(paths, "."+name)
 		if home, err := os.UserHomeDir(); err == nil {
-			paths = append(paths, filepath.Join(home, "."+name+".yaml"))
+			paths = appendConfigFormats(paths, filepath.Join(home, "."+name))
 		}
-		paths = append(paths, "/etc/"+name+"/config.yaml")
+		paths = appendConfigFormats(paths, "/etc/"+name+"/config")
 	}
 
-	paths = append(paths, "config.yaml", "config/config.yaml")
+	paths = appendConfigFormats(paths, "config")
+	paths = appendConfigFormats(paths, filepath.Join("config", "config"))
 
 	return paths
+}
+
+func appendConfigFormats(paths []string, base string) []string {
+	return append(paths, base+".yaml", base+".yml", base+".json")
 }
 
 func setCLIFlagValue(cmd *cli.Command, config map[string]any, configPath, cliFlag string, fieldType reflect.Type) bool {

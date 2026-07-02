@@ -17,9 +17,10 @@ type commandProfile struct {
 // Command applies cfgm's urfave/cli integration profile.
 //
 // It loads, in order:
-//  1. the file pointed to by --config / -c when explicitly set
-//  2. environment variables using --env-prefix / -e or the root command name
-//  3. explicitly set CLI flags
+//  1. optional default paths using the root command name
+//  2. the file pointed to by --config / -c when explicitly set
+//  3. environment variables using --env-prefix / -e or the root command name
+//  4. explicitly set CLI flags
 func Command(cmd *cli.Command, opts ...CommandOption) Option {
 	profile := &commandProfile{cmd: cmd}
 	for _, opt := range opts {
@@ -42,6 +43,10 @@ func IgnoreFlags(names ...string) CommandOption {
 func (p *commandProfile) applyLoadOption(options *loadOptions) {
 	if p == nil || p.cmd == nil {
 		return
+	}
+
+	if rootName := commandRootName(p.cmd); rootName != "" {
+		options.defaultPathApp = rootName
 	}
 
 	if configPath := commandConfigPath(p.cmd); configPath != "" {
@@ -92,15 +97,7 @@ func commandConfigPath(cmd *cli.Command) string {
 }
 
 func commandNameToEnvPrefix(cmd *cli.Command) string {
-	if cmd == nil {
-		return ""
-	}
-	lineage := cmd.Lineage()
-	if len(lineage) == 0 {
-		return ""
-	}
-	rootCmd := lineage[len(lineage)-1]
-	name := rootCmd.Name
+	name := commandRootName(cmd)
 	if name == "" {
 		return ""
 	}
@@ -119,4 +116,16 @@ func commandEnvPrefix(cmd *cli.Command) (string, bool) {
 	}
 
 	return "", false
+}
+
+func commandRootName(cmd *cli.Command) string {
+	if cmd == nil {
+		return ""
+	}
+	lineage := cmd.Lineage()
+	if len(lineage) == 0 {
+		return ""
+	}
+
+	return lineage[len(lineage)-1].Name
 }

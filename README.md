@@ -6,26 +6,28 @@
 [![codecov](https://codecov.io/gh/lwmacct/251207-go-pkg-cfgm/branch/main/graph/badge.svg)](https://codecov.io/gh/lwmacct/251207-go-pkg-cfgm)
 [![Go Report Card](https://goreportcard.com/badge/github.com/lwmacct/251207-go-pkg-cfgm)](https://goreportcard.com/report/github.com/lwmacct/251207-go-pkg-cfgm)
 
-通用 Go 配置加载库。配置结构体用 `json` tag 描述 key，加载来源由调用方显式声明。
+通用 Go 配置加载库。配置结构体用 `json` tag 描述 key，默认搜索约定配置文件，并允许调用方声明额外来源。
 
 <!--TOC-->
 
 ## Table of Contents
 
-- [特性](#特性) `:26+9`
-- [安装](#安装) `:35+6`
-- [快速开始](#快速开始) `:41+121`
-  - [定义配置](#定义配置) `:43+24`
-  - [加载配置](#加载配置) `:67+37`
-  - [CLI 集成](#cli-集成) `:104+58`
-- [辅助能力](#辅助能力) `:162+44`
-- [License](#license) `:206+3`
+- [特性](#特性) `:27+10`
+- [安装](#安装) `:37+6`
+- [快速开始](#快速开始) `:43+128`
+  - [定义配置](#定义配置) `:45+24`
+  - [加载配置](#加载配置) `:69+30`
+  - [CLI 集成](#cli-集成) `:99+51`
+  - [关闭默认行为](#关闭默认行为) `:150+21`
+- [辅助能力](#辅助能力) `:171+44`
+- [License](#license) `:215+3`
 
 <!--TOC-->
 
 ## 特性
 
-- **显式来源**：默认值、文件、环境变量、CLI flags 都通过 options 声明。
+- **默认路径**：自动搜索 `DefaultPaths()`，也可用 `NoDefaultPaths()` 关闭。
+- **显式来源**：额外文件、环境变量、CLI flags 都通过 options 声明。
 - **泛型加载**：`Load[T]` / `MustLoad[T]` 直接返回强类型配置。
 - **CLI profile**：`Command(cmd)` 封装 urfave/cli 常见约定。
 - **严格校验**：默认拒绝配置文件中的未知 key。
@@ -69,22 +71,16 @@ YAML 和 JSON 都使用 `json` tag 作为配置 key。
 ```go
 cfg, err := cfgm.Load(ctx,
     DefaultConfig(),
-    cfgm.File("config/config.yaml", cfgm.Optional()),
     cfgm.Env("APP_"),
 )
 ```
 
-source 按声明顺序合并，后面的 source 覆盖前面的 source。只使用默认值时不传任何来源：
-
-```go
-cfg, err := cfgm.Load(ctx, DefaultConfig())
-```
+`Load` 默认会先搜索 `DefaultPaths()`，即 `config.yaml`、`config.yml`、`config.json`、`config/config.yaml`、`config/config.yml`、`config/config.json`。这些文件是 optional，缺失时继续使用默认值。source 按加载顺序合并，后面的 source 覆盖前面的 source。
 
 启动阶段可用 panic 版本：
 
 ```go
 cfg := cfgm.MustLoad(ctx, DefaultConfig(),
-    cfgm.File("config/config.yaml", cfgm.Optional()),
     cfgm.Env("APP_"),
 )
 ```
@@ -95,7 +91,6 @@ cfg := cfgm.MustLoad(ctx, DefaultConfig(),
 cfg, report, err := cfgm.LoadReport(ctx,
     DefaultConfig(),
     cfgm.Logger(logger),
-    cfgm.File("config/config.yaml", cfgm.Optional()),
     cfgm.Env("APP_"),
 )
 _ = report.Sources
@@ -117,19 +112,12 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 `Command(cmd)` 会按顺序加载：
 
-1. 显式设置的 `--config / -c` 配置文件
-2. `--env-prefix / -e` 指定的环境变量前缀，或根命令名转换出的前缀
-3. 当前命令上显式设置的配置 flags
-
-模板展开默认开启。需要保留原始 `${...}` 字符串时：
-
-```go
-cfg, err := cfgm.Load(ctx,
-    DefaultConfig(),
-    cfgm.NoTemplateExpansion(),
-    cfgm.Command(cmd),
-)
-```
+1. 根命令名对应的默认路径，例如 `.app.yaml`、`.app.yml`、`.app.json`
+2. 用户和系统默认路径，例如 `~/.app.yaml`、`/etc/app/config.yaml`
+3. 通用默认路径 `config.yaml`、`config.yml`、`config.json`
+4. 显式设置的 `--config / -c` 配置文件
+5. `--env-prefix / -e` 指定的环境变量前缀，或根命令名转换出的前缀
+6. 当前命令上显式设置的配置 flags
 
 根命令可挂载约定 flags：
 
@@ -158,6 +146,27 @@ CLI flag 名称从配置路径推导，并按命令链递归剥离作用域：
 | `server service` | `server.service.port` | `--port`        |
 
 完整路径仍是 fallback 候选，例如 `server` 命令下仍可声明 `--redis.url`。
+
+### 关闭默认行为
+
+`NoDefaultPaths()` 会跳过自动搜索 `DefaultPaths()`：
+
+```go
+cfg, err := cfgm.Load(ctx,
+    DefaultConfig(),
+    cfgm.NoDefaultPaths(),
+)
+```
+
+`NoTemplateExpansion()` 会保留默认值和内置文件 source 中的原始 `${...}` 字符串：
+
+```go
+cfg, err := cfgm.Load(ctx,
+    DefaultConfig(),
+    cfgm.NoTemplateExpansion(),
+    cfgm.Command(cmd),
+)
+```
 
 ## 辅助能力
 

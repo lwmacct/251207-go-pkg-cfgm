@@ -18,8 +18,8 @@ func Example_defaultPaths() {
 	fmt.Println("带应用名路径数量:", len(paths))
 
 	// Output:
-	// 基础路径数量: 2
-	// 带应用名路径数量: 5
+	// 基础路径数量: 6
+	// 带应用名路径数量: 15
 }
 
 func Example_exampleYAML() {

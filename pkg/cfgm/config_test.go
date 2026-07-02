@@ -75,10 +75,133 @@ func TestLoadReportWithLogger(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "from-file", cfg.Name)
-	require.Len(t, report.Sources, 1)
-	assert.Equal(t, "file:"+configPath, report.Sources[0].Name)
-	assert.Equal(t, []string{"name"}, report.Sources[0].Keys)
+	require.Len(t, report.Sources, 2)
+	assert.Equal(t, "files", report.Sources[0].Name)
+	assert.Empty(t, report.Sources[0].Keys)
+	assert.Equal(t, "file:"+configPath, report.Sources[1].Name)
+	assert.Equal(t, []string{"name"}, report.Sources[1].Keys)
 	assert.Contains(t, logs.String(), "msg=\"Loaded config source\"")
+}
+
+func TestLoadSearchesDefaultPaths(t *testing.T) {
+	type Config struct {
+		Name  string `json:"name"`
+		Debug bool   `json:"debug"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile("config.yaml", []byte(`
+name: "from-default-path"
+debug: true
+`), 0600))
+
+	cfg, err := Load(context.Background(), Config{Name: "default"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-default-path", cfg.Name)
+	assert.True(t, cfg.Debug)
+}
+
+func TestLoadSearchesDefaultJSONPaths(t *testing.T) {
+	type Config struct {
+		Name  string `json:"name"`
+		Debug bool   `json:"debug"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile("config.json", []byte(`{
+  "name": "from-default-json",
+  "debug": true
+}`), 0600))
+
+	cfg, err := Load(context.Background(), Config{Name: "default"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-default-json", cfg.Name)
+	assert.True(t, cfg.Debug)
+}
+
+func TestLoadSearchesDefaultYMLPaths(t *testing.T) {
+	type Config struct {
+		Name  string `json:"name"`
+		Debug bool   `json:"debug"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile("config.yml", []byte(`
+name: "from-default-yml"
+debug: true
+`), 0600))
+
+	cfg, err := Load(context.Background(), Config{Name: "default"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-default-yml", cfg.Name)
+	assert.True(t, cfg.Debug)
+}
+
+func TestDefaultPathYAMLPrecedesYMLAndJSONAtSameLocation(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile("config.yaml", []byte(`name: "from-yaml"`), 0600))
+	require.NoError(t, os.WriteFile("config.yml", []byte(`name: "from-yml"`), 0600))
+	require.NoError(t, os.WriteFile("config.json", []byte(`{"name": "from-json"}`), 0600))
+
+	cfg, err := Load(context.Background(), Config{Name: "default"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-yaml", cfg.Name)
+}
+
+func TestLoadDefaultPathsAreOptional(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	t.Chdir(t.TempDir())
+
+	cfg, err := Load(context.Background(), Config{Name: "default"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "default", cfg.Name)
+}
+
+func TestNoDefaultPaths(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile("config.yaml", []byte(`name: "from-default-path"`), 0600))
+
+	cfg, err := Load(context.Background(), Config{Name: "default"}, NoDefaultPaths())
+	require.NoError(t, err)
+
+	assert.Equal(t, "default", cfg.Name)
+}
+
+func TestExplicitSourcesOverrideDefaultPaths(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile("config.yaml", []byte(`name: "from-default-path"`), 0600))
+	explicitPath := writeTempConfig(t, `name: "from-explicit-file"`)
+
+	cfg, err := Load(context.Background(), Config{Name: "default"}, File(explicitPath))
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-explicit-file", cfg.Name)
 }
 
 func TestLoadRejectsUnknownKeysByDefault(t *testing.T) {
@@ -218,6 +341,61 @@ server:
 	assert.Equal(t, 5*time.Second, loaded.Server.Timeout)
 }
 
+func TestCommandProfileUsesRootNameForDefaultPaths(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile(".app.yaml", []byte(`name: "from-app-default-path"`), 0600))
+	require.NoError(t, os.WriteFile("config.yaml", []byte(`name: "from-generic-default-path"`), 0600))
+
+	var loaded *Config
+	cmd := &cli.Command{
+		Name: "app",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			cfg, err := Load(ctx, Config{Name: "default"}, Command(cmd))
+			loaded = cfg
+
+			return err
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{"app"})
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, "from-app-default-path", loaded.Name)
+}
+
+func TestCommandExplicitConfigOverridesDefaultPaths(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	require.NoError(t, os.WriteFile(".app.yaml", []byte(`name: "from-app-default-path"`), 0600))
+	configPath := writeTempConfig(t, `name: "from-explicit-config"`)
+
+	var loaded *Config
+	cmd := &cli.Command{
+		Name:  "app",
+		Flags: []cli.Flag{ConfigFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			cfg, err := Load(ctx, Config{Name: "default"}, Command(cmd))
+			loaded = cfg
+
+			return err
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{"app", "--config", configPath})
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, "from-explicit-config", loaded.Name)
+}
+
 func TestCommandProfileExpandsDefaultsByDefault(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
@@ -285,6 +463,13 @@ func TestCommandProfileRejectsUnmappedFlags(t *testing.T) {
 }
 
 func TestDefaultPaths(t *testing.T) {
-	assert.Equal(t, []string{"config.yaml", "config/config.yaml"}, DefaultPaths())
-	assert.Len(t, DefaultPaths("app"), 5)
+	assert.Equal(t, []string{
+		"config.yaml",
+		"config.yml",
+		"config.json",
+		"config/config.yaml",
+		"config/config.yml",
+		"config/config.json",
+	}, DefaultPaths())
+	assert.Len(t, DefaultPaths("app"), 15)
 }

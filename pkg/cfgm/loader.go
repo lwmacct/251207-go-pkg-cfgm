@@ -40,6 +40,8 @@ type loadOptions struct {
 	sources           []Source
 	logger            *slog.Logger
 	noTemplates       bool
+	noDefaultPaths    bool
+	defaultPathApp    string
 	strictUnknownKeys bool
 }
 
@@ -105,6 +107,9 @@ func LoadReport[T any](ctx context.Context, defaultConfig T, opts ...Option) (*T
 	loader.logger = options.logger
 	loader.expandDefaults = !options.noTemplates
 	loader.strictUnknownKeys = options.strictUnknownKeys
+	if !options.noDefaultPaths {
+		loader.Add(Files(DefaultPaths(options.defaultPathApp), Optional()))
+	}
 	loader.Add(options.sources...)
 	if options.noTemplates {
 		disableTemplateExpansion(loader.sources)
@@ -143,6 +148,13 @@ func ExpandDefaultTemplates() Option {
 func NoTemplateExpansion() Option {
 	return optionFunc(func(options *loadOptions) {
 		options.noTemplates = true
+	})
+}
+
+// NoDefaultPaths disables the optional DefaultPaths config file source.
+func NoDefaultPaths() Option {
+	return optionFunc(func(options *loadOptions) {
+		options.noDefaultPaths = true
 	})
 }
 
