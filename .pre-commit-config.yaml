@@ -14,16 +14,18 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=512"]
 
-  - repo: https://github.com/lwmacct/251211-pre-commit
-    rev: v1.0.2
-    hooks:
-      - id: golangci-lint
-
   - repo: local
     hooks:
-      - id: update-markdown-toc
+      - id: 251202-mdtoc
         name: Update Markdown TOC
-        entry: bash -c 'fd -e md | mdtoc -i'
+        entry: bash -c 'fd -e md | 251202-mdtoc -i'
         language: unsupported
-        always_run: true
         pass_filenames: false
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run --new --fix
+        language: unsupported
+        pass_filenames: false
+        types: [go]
+        require_serial: true
