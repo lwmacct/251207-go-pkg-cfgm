@@ -55,7 +55,7 @@ func (s ConfigSchema) Fields() []Field {
 // Command 返回指定命令链下的元数据投影。
 //
 // names 使用 urfave/cli 的命令名顺序，例如 Command("server", "service")。
-// flag 名称映射规则与 LoadCmd 一致：递归剥离命令链前缀，完整路径作为 fallback。
+// flag 名称映射规则与 Command 一致：递归剥离命令链前缀，完整路径作为 fallback。
 func (s ConfigSchema) Command(names ...string) CommandSchema {
 	if s.index == nil {
 		return CommandSchema{}

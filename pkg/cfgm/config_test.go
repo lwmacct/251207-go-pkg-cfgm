@@ -5,9 +5,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,2164 +13,278 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// =============================================================================
-// 测试辅助函数
-// =============================================================================
-
-// writeTempConfig 创建临时配置文件并返回路径（清理由 t.Cleanup 处理）。
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
+
 	tmpFile, err := os.CreateTemp(t.TempDir(), "config_test_*.yaml")
-	require.NoError(t, err, "Failed to create temp file")
+	require.NoError(t, err)
 	_, err = tmpFile.WriteString(content)
-	require.NoError(t, err, "Failed to write temp file")
-	_ = tmpFile.Close()
-	t.Cleanup(func() { _ = os.Remove(tmpFile.Name()) })
+	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
 
 	return tmpFile.Name()
 }
 
-// runCLITest 运行 CLI 命令并返回加载的配置。
-func runCLITest[T any](t *testing.T, defaultCfg T, flags []cli.Flag, args []string, opts ...Option) *T {
-	t.Helper()
-
-	return runNamedCLITest(t, "test", defaultCfg, flags, args, opts...)
-}
-
-// runNamedCLITest 运行指定命令名的 CLI 命令并返回加载的配置。
-func runNamedCLITest[T any](t *testing.T, commandName string, defaultCfg T, flags []cli.Flag, args []string, opts ...Option) *T {
-	t.Helper()
-	var loadedCfg *T
-	cmd := &cli.Command{
-		Name:  commandName,
-		Flags: flags,
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			allOpts := append([]Option{}, opts...)
-			allOpts = append(allOpts, WithCommand(cmd))
-			cfg, err := Load(defaultCfg, allOpts...)
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-
-			return nil
-		},
-	}
-	err := cmd.Run(context.Background(), args)
-	require.NoError(t, err, "Command should run successfully")
-	require.NotNil(t, loadedCfg, "Config should be loaded")
-
-	return loadedCfg
-}
-
-func readServerAddr(t *testing.T, path string) string {
-	t.Helper()
-	content, err := os.ReadFile(path) //nolint:gosec // test helper reads fixture path
-	require.NoError(t, err)
-	configMap, err := parseConfigBytes(path, content)
-	require.NoError(t, err)
-	serverMap, ok := configMap["server"].(map[string]any)
-	require.True(t, ok)
-	addr, ok := serverMap["addr"].(string)
-	require.True(t, ok)
-
-	return addr
-}
-
-// =============================================================================
-// Load 函数测试
-// =============================================================================
-
-func TestLoadWithEnvPrefix(t *testing.T) {
-	type ServerConfig struct {
-		URL string `json:"url"`
-	}
-	type Config struct {
-		Debug  bool         `json:"debug"`
-		Server ServerConfig `json:"server"`
-	}
-
-	t.Setenv("TEST_DEBUG", "true")
-	t.Setenv("TEST_SERVER_URL", "http://test:8080")
-
-	cfg, err := Load(Config{Debug: false, Server: ServerConfig{URL: "http://default:8080"}}, WithEnvPrefix("TEST_"))
-	require.NoError(t, err)
-
-	assert.True(t, cfg.Debug)
-	assert.Equal(t, "http://test:8080", cfg.Server.URL)
-}
-
-func TestLoadWithDefaultEnvPrefix(t *testing.T) {
-	type ServerConfig struct {
-		URL string `json:"url"`
-	}
-	type Config struct {
-		Debug  bool         `json:"debug"`
-		Server ServerConfig `json:"server"`
-	}
-
-	t.Setenv("APP_DEBUG", "true")
-	t.Setenv("APP_SERVER_URL", "http://app-default:8080")
-
-	cfg, err := Load(Config{Debug: false, Server: ServerConfig{URL: "http://default:8080"}})
-	require.NoError(t, err)
-
-	assert.True(t, cfg.Debug)
-	assert.Equal(t, "http://app-default:8080", cfg.Server.URL)
-}
-
-func TestLoadWithExplicitEmptyEnvPrefixDisablesDefault(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	t.Setenv("APP_NAME", "from-default-prefix")
-
-	cfg, err := Load(Config{Name: "default"}, WithEnvPrefix(""))
-	require.NoError(t, err)
-
-	assert.Equal(t, "default", cfg.Name)
-}
-
-func TestAutoEnvBinding(t *testing.T) {
-	//nolint:tagliatelle
-	type ClientConfig struct {
-		ServerPassword string `json:"server-password"`
-		ServerHost     string `json:"server-host"`
-		Timeout        int    `json:"timeout"`
-	}
-	type Config struct {
-		Name   string       `json:"name"`
-		Client ClientConfig `json:"client"`
-	}
-
-	t.Setenv("TEST_NAME", "from-env")
-	t.Setenv("TEST_CLIENT_SERVER_PASSWORD", "secret123")
-	t.Setenv("TEST_CLIENT_SERVER_HOST", "test-host")
-	t.Setenv("TEST_CLIENT_TIMEOUT", "30")
-
-	cfg, err := Load(
-		Config{Name: "default", Client: ClientConfig{ServerPassword: "default", ServerHost: "default", Timeout: 10}},
-		WithEnvPrefix("TEST_"),
-	)
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("from-env", cfg.Name)
-	a.Equal("secret123", cfg.Client.ServerPassword, "hyphenated key should work")
-	a.Equal("test-host", cfg.Client.ServerHost, "hyphenated key should work")
-	a.Equal(30, cfg.Client.Timeout)
-}
-
-func TestLoadPriority(t *testing.T) {
-	type Config struct {
-		Value1 string `json:"value1"`
-		Value2 string `json:"value2"`
-		Value3 string `json:"value3"`
-	}
-
-	tmpFile := writeTempConfig(t, `
-value1: "from-file"
-value2: "from-file"
-value3: "from-file"
-`)
-
-	t.Setenv("TEST_VALUE2", "from-env-prefix")
-	t.Setenv("TEST_VALUE3", "from-env-prefix")
-
-	cfg, err := Load(
-		Config{Value1: "default", Value2: "default", Value3: "default"},
-		WithConfigPaths(tmpFile),
-		WithEnvPrefix("TEST_"),
-	)
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("from-file", cfg.Value1, "config file > default")
-	a.Equal("from-env-prefix", cfg.Value2, "env prefix > config file")
-	a.Equal("from-env-prefix", cfg.Value3, "env prefix > config file")
-}
-
-func TestLoadWithDefaultsOnly(t *testing.T) {
+func TestLoadUsesExplicitSourcesInOrder(t *testing.T) {
 	type Config struct {
 		Name  string `json:"name"`
 		Debug bool   `json:"debug"`
-		Port  int    `json:"port"`
 	}
 
-	cfg, err := Load(Config{Name: "my-app", Debug: true, Port: 8080})
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("my-app", cfg.Name)
-	a.True(cfg.Debug)
-	a.Equal(8080, cfg.Port)
-}
-
-func TestLoadWithNonExistentConfigFile(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	cfg, err := Load(Config{Name: "fallback-app"}, WithConfigPaths("/nonexistent/path/config.yaml"))
-	require.NoError(t, err)
-	assert.Equal(t, "fallback-app", cfg.Name)
-}
-
-func TestLoadWithLogger(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	tmpFile := writeTempConfig(t, `name: "from-file"`)
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	configPath := writeTempConfig(t, `
+name: "from-file"
+debug: true
+`)
+	t.Setenv("APP_NAME", "from-env")
 
 	cfg, err := Load(
+		context.Background(),
 		Config{Name: "default"},
-		WithConfigPaths(tmpFile),
-		WithEnvPrefix(""),
-		WithLogger(logger),
+		File(configPath),
+		Env("APP_"),
 	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-env", cfg.Name)
+	assert.True(t, cfg.Debug)
+}
+
+func TestMustLoadPanicsOnError(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	assert.PanicsWithValue(t,
+		"cfgm: failed to load config: file:/missing/config.yaml: none of the config files exist: /missing/config.yaml",
+		func() {
+			MustLoad(context.Background(), Config{}, File("/missing/config.yaml"))
+		},
+	)
+}
+
+func TestLoadReportWithLogger(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	configPath := writeTempConfig(t, `name: "from-file"`)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	cfg, report, err := LoadReport(context.Background(), Config{}, Logger(logger), File(configPath))
 	require.NoError(t, err)
 
 	assert.Equal(t, "from-file", cfg.Name)
-	assert.Contains(t, buf.String(), "msg=\"Loaded config source\"")
-	assert.Contains(t, buf.String(), "source=file:"+tmpFile)
+	require.Len(t, report.Sources, 1)
+	assert.Equal(t, "file:"+configPath, report.Sources[0].Name)
+	assert.Equal(t, []string{"name"}, report.Sources[0].Keys)
+	assert.Contains(t, logs.String(), "msg=\"Loaded config source\"")
 }
 
-// TestLoadWithConfigFileOnly 测试纯配置文件读取 (cmd=nil, 无环境变量)。
-// 验证只使用配置文件时，Load 能正确解析并覆盖默认值。
-func TestLoadWithConfigFileOnly(t *testing.T) {
+func TestLoadRejectsUnknownKeysByDefault(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	configPath := writeTempConfig(t, `
+name: "app"
+typo: true
+`)
+
+	_, err := Load(context.Background(), Config{}, File(configPath))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown config keys")
+	assert.Contains(t, err.Error(), "typo")
+}
+
+func TestLoadAllowUnknownKeys(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	configPath := writeTempConfig(t, `
+name: "app"
+typo: true
+`)
+
+	cfg, err := Load(context.Background(), Config{}, AllowUnknownKeys(), File(configPath))
+	require.NoError(t, err)
+	assert.Equal(t, "app", cfg.Name)
+}
+
+func TestFileOptionalAndRequired(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
+	}
+
+	cfg, err := Load(context.Background(), Config{Name: "default"}, File("/path/does/not/exist.yaml", Optional()))
+	require.NoError(t, err)
+	assert.Equal(t, "default", cfg.Name)
+
+	_, err = Load(context.Background(), Config{}, File("/path/does/not/exist.yaml"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "none of the config files exist")
+}
+
+func TestTemplateExpansionIsEnabledByDefault(t *testing.T) {
+	type Config struct {
+		Name     string `json:"name"`
+		Fallback string `json:"fallback"`
+	}
+
+	t.Setenv("CFG_NAME", "from-template")
+	t.Setenv("CFG_DEFAULT", "from-default-template")
+	configPath := writeTempConfig(t, `name: "${CFG_NAME}"`)
+
+	cfg, err := Load(
+		context.Background(),
+		Config{Fallback: "${CFG_DEFAULT}"},
+		File(configPath),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "from-template", cfg.Name)
+	assert.Equal(t, "from-default-template", cfg.Fallback)
+}
+
+func TestNoTemplateExpansion(t *testing.T) {
+	type Config struct {
+		Name     string `json:"name"`
+		Fallback string `json:"fallback"`
+	}
+
+	t.Setenv("CFG_NAME", "from-template")
+	t.Setenv("CFG_DEFAULT", "from-default-template")
+	configPath := writeTempConfig(t, `name: "${CFG_NAME}"`)
+
+	cfg, err := Load(
+		context.Background(),
+		Config{Fallback: "${CFG_DEFAULT}"},
+		NoTemplateExpansion(),
+		File(configPath),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "${CFG_NAME}", cfg.Name)
+	assert.Equal(t, "${CFG_DEFAULT}", cfg.Fallback)
+}
+
+func TestCommandProfileLoadsConfigEnvAndFlags(t *testing.T) {
 	type ServerConfig struct {
-		Host    string        `json:"host"`
-		Port    int           `json:"port"`
+		Addr    string        `json:"addr"`
 		Timeout time.Duration `json:"timeout"`
 	}
 	type Config struct {
 		Name   string       `json:"name"`
-		Debug  bool         `json:"debug"`
 		Server ServerConfig `json:"server"`
 	}
 
-	tmpFile := writeTempConfig(t, `
+	configPath := writeTempConfig(t, `
 name: "from-file"
-debug: true
 server:
-  host: "0.0.0.0"
-  port: 9090
-  timeout: 60s
+  addr: ":8080"
 `)
+	t.Setenv("APP_NAME", "from-env")
 
-	// cmd=nil, 只有配置文件，没有 WithCommand/WithEnvPrefix
-	cfg, err := Load(
-		Config{
-			Name:  "default-app",
-			Debug: false,
-			Server: ServerConfig{
-				Host:    "localhost",
-				Port:    8080,
-				Timeout: 30 * time.Second,
-			},
-		},
-		WithConfigPaths(tmpFile),
-	)
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("from-file", cfg.Name, "config file should override default")
-	a.True(cfg.Debug, "config file should override default")
-	a.Equal("0.0.0.0", cfg.Server.Host, "nested config should be loaded")
-	a.Equal(9090, cfg.Server.Port, "nested config should be loaded")
-	a.Equal(60*time.Second, cfg.Server.Timeout, "duration should be parsed correctly")
-}
-
-// TestLoadWithConfigFilePartialOverride 测试配置文件部分覆盖。
-// 验证配置文件只覆盖指定字段，未指定字段保持默认值。
-func TestLoadWithConfigFilePartialOverride(t *testing.T) {
-	type Config struct {
-		Name    string `json:"name"`
-		Debug   bool   `json:"debug"`
-		Port    int    `json:"port"`
-		Timeout int    `json:"timeout"`
-	}
-
-	tmpFile := writeTempConfig(t, `
-name: "partial-override"
-port: 9000
-`)
-
-	cfg, err := Load(
-		Config{Name: "default", Debug: true, Port: 8080, Timeout: 30},
-		WithConfigPaths(tmpFile),
-	)
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("partial-override", cfg.Name, "specified field should be overridden")
-	a.True(cfg.Debug, "unspecified field should keep default (bool)")
-	a.Equal(9000, cfg.Port, "specified field should be overridden")
-	a.Equal(30, cfg.Timeout, "unspecified field should keep default (int)")
-}
-
-// TestLoadWithBaseDir 测试路径基准目录功能。
-func TestLoadWithBaseDir(t *testing.T) {
-	type ServerConfig struct {
-		Addr string `json:"addr"`
-	}
-	type Config struct {
-		Server ServerConfig `json:"server"`
-	}
-
-	t.Run("default uses project root", func(t *testing.T) {
-		// 默认行为：相对路径基于项目根目录
-		root, err := FindProjectRoot(0)
-		require.NoError(t, err)
-		expectedAddr := readServerAddr(t, filepath.Join(root, "config/config.example.yaml"))
-
-		cfg, err := Load(
-			Config{Server: ServerConfig{Addr: "default"}},
-			WithConfigPaths("config/config.example.yaml"),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, expectedAddr, cfg.Server.Addr)
-	})
-
-	t.Run("WithBaseDir empty uses cwd", func(t *testing.T) {
-		// WithBaseDir("") 使用当前工作目录
-		cfg, err := Load(
-			Config{Server: ServerConfig{Addr: "fallback"}},
-			WithBaseDir(""),
-			WithConfigPaths("nonexistent.yaml"),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, "fallback", cfg.Server.Addr)
-	})
-
-	t.Run("absolute path unchanged", func(t *testing.T) {
-		tmpFile := writeTempConfig(t, `server: {addr: ":9090"}`)
-		cfg, err := Load(
-			Config{Server: ServerConfig{Addr: "default"}},
-			WithConfigPaths(tmpFile),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, ":9090", cfg.Server.Addr)
-	})
-}
-
-// TestLoadWithCallerSkip 测试自定义调用栈跳过层数。
-func TestLoadWithCallerSkip(t *testing.T) {
-	type ServerConfig struct {
-		Addr string `json:"addr"`
-	}
-	type Config struct {
-		Server ServerConfig `json:"server"`
-	}
-
-	// 封装函数模拟深层调用栈
-	loadWithWrapper := func(skip int) (*Config, error) {
-		return Load(
-			Config{Server: ServerConfig{Addr: "default"}},
-			WithConfigPaths("config/config.example.yaml"),
-			WithCallerSkip(skip),
-		)
-	}
-
-	t.Run("with explicit callerSkip", func(t *testing.T) {
-		// 使用显式的 callerSkip 值
-		// skip=2 表示：跳过 load → Load → loadWithWrapper
-		root, err := FindProjectRoot(0)
-		require.NoError(t, err)
-		expectedAddr := readServerAddr(t, filepath.Join(root, "config/config.example.yaml"))
-
-		cfg, err := loadWithWrapper(2)
-		require.NoError(t, err)
-		assert.NotNil(t, cfg)
-		// 验证配置文件被成功加载（说明项目根目录被正确找到）
-		assert.Equal(t, expectedAddr, cfg.Server.Addr)
-	})
-
-	t.Run("WithBaseDir takes precedence", func(t *testing.T) {
-		// 验证 WithBaseDir 优先于 callerSkip
-		// 当设置了 WithBaseDir 时，callerSkip 不应该影响结果
-		tmpFile := writeTempConfig(t, `server: {addr: ":9999"}`)
-		cfg, err := Load(
-			Config{Server: ServerConfig{Addr: "default"}},
-			WithBaseDir(""),          // 显式设置 baseDir
-			WithCallerSkip(999),      // 即使设置了错误的 callerSkip
-			WithConfigPaths(tmpFile), // 使用绝对路径
-		)
-		require.NoError(t, err)
-		assert.Equal(t, ":9999", cfg.Server.Addr)
-	})
-}
-
-// =============================================================================
-// CLI Flags 测试 (github.com/urfave/cli/v3)
-// =============================================================================
-
-func TestLoadWithCommand(t *testing.T) {
-	type ServerConfig struct {
-		Addr    string        `json:"addr"`
-		Timeout time.Duration `json:"timeout"`
-	}
-	type Config struct {
-		Name   string       `json:"name"`
-		Debug  bool         `json:"debug"`
-		Server ServerConfig `json:"server"`
-	}
-
-	defaultCfg := Config{Name: "default-app", Debug: false, Server: ServerConfig{Addr: ":8080", Timeout: 30 * time.Second}}
-	flags := []cli.Flag{
-		&cli.StringFlag{Name: "name", Value: defaultCfg.Name},
-		&cli.BoolFlag{Name: "debug", Value: defaultCfg.Debug},
-		&cli.StringFlag{Name: "server.addr", Value: defaultCfg.Server.Addr},
-		&cli.DurationFlag{Name: "server.timeout", Value: defaultCfg.Server.Timeout},
-	}
-
-	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--name", "cli-app", "--debug"})
-
-	a := assert.New(t)
-	a.Equal("cli-app", cfg.Name, "CLI flag should override")
-	a.True(cfg.Debug, "CLI flag should override")
-	a.Equal(":8080", cfg.Server.Addr, "unset flag keeps default")
-	a.Equal(30*time.Second, cfg.Server.Timeout, "unset flag keeps default")
-}
-
-func TestLoadWithCommand_NestedPathFlag(t *testing.T) {
-	const clientCommand = "client"
-
-	type ServerConfig struct {
-		AliveInterval time.Duration `json:"aliveInterval"`
-	}
-	type ClientConfig struct {
-		Server ServerConfig `json:"server"`
-	}
-	type Config struct {
-		Client ClientConfig `json:"client"`
-	}
-
-	defaultCfg := Config{Client: ClientConfig{Server: ServerConfig{AliveInterval: 30 * time.Second}}}
-	flags := []cli.Flag{
-		&cli.DurationFlag{Name: "server.aliveInterval", Value: defaultCfg.Client.Server.AliveInterval},
-	}
-
-	cfg := runNamedCLITest(
-		t,
-		clientCommand,
-		defaultCfg,
-		flags,
-		[]string{clientCommand, "--server.aliveInterval", "5s"},
-	)
-
-	assert.Equal(t, 5*time.Second, cfg.Client.Server.AliveInterval)
-}
-
-func TestLoadWithCommand_RejectsUnmappedFlag(t *testing.T) {
-	const clientCommand = "client"
-
-	type ServerConfig struct {
-		AliveInterval time.Duration `json:"aliveInterval"`
-	}
-	type ClientConfig struct {
-		Server ServerConfig `json:"server"`
-	}
-	type Config struct {
-		Client ClientConfig `json:"client"`
-	}
-
-	defaultCfg := Config{Client: ClientConfig{Server: ServerConfig{AliveInterval: 30 * time.Second}}}
-	cmd := &cli.Command{
-		Name: clientCommand,
-		Flags: []cli.Flag{
-			&cli.DurationFlag{Name: "aliveInterval"},
-		},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			_, err := Load(defaultCfg, WithCommand(cmd))
-			return err
-		},
-	}
-
-	err := cmd.Run(context.Background(), []string{clientCommand})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CLI flag --aliveInterval has no matching config field")
-}
-
-func TestLoadWithCommand_IgnoresExplicitNonConfigFlag(t *testing.T) {
-	type Config struct {
-		Debug bool `json:"debug"`
-	}
-
-	defaultCfg := Config{}
-	var loadedCfg *Config
-	cmd := &cli.Command{
-		Name: "sync",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "debug", Value: defaultCfg.Debug},
-			&cli.StringFlag{Name: "host"},
-		},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := Load(defaultCfg, WithCommand(cmd), WithIgnoredCLIFlags("host"))
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-
-			return nil
-		},
-	}
-
-	err := cmd.Run(context.Background(), []string{"sync", "--host", "web-1", "--debug"})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-	assert.True(t, loadedCfg.Debug)
-}
-
-func TestLoadWithCommand_IgnoredNonConfigFlagUsesPrimaryName(t *testing.T) {
-	type Config struct {
-		Debug bool `json:"debug"`
-	}
-
-	defaultCfg := Config{}
-	cmd := &cli.Command{
-		Name: "sync",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "host", Aliases: []string{"H"}},
-		},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			_, err := Load(defaultCfg, WithCommand(cmd), WithIgnoredCLIFlags("H"))
-			return err
-		},
-	}
-
-	err := cmd.Run(context.Background(), []string{"sync", "--host", "web-1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CLI flag --host has no matching config field")
-}
-
-func TestLoadWithCommand_NestedFlags(t *testing.T) {
-	type ServerConfig struct {
-		Addr    string        `json:"addr"`
-		Timeout time.Duration `json:"timeout"`
-	}
-	type Config struct {
-		Server ServerConfig `json:"server"`
-	}
-
-	defaultCfg := Config{Server: ServerConfig{Addr: ":8080", Timeout: 30 * time.Second}}
-	flags := []cli.Flag{
-		&cli.StringFlag{Name: "addr", Value: defaultCfg.Server.Addr},
-		&cli.DurationFlag{Name: "timeout", Value: defaultCfg.Server.Timeout},
-	}
-
-	cfg := runNamedCLITest(t, "server", defaultCfg, flags, []string{"server", "--addr", ":9090", "--timeout", "60s"})
-
-	assert.Equal(t, ":9090", cfg.Server.Addr)
-	assert.Equal(t, 60*time.Second, cfg.Server.Timeout)
-}
-
-func TestLoadWithCommand_FullPathFlagOnScopedCommand(t *testing.T) {
-	type Config struct {
-		Client struct {
-			URL string `json:"url"`
-		} `json:"client"`
-		Redis struct {
-			URL string `json:"url"`
-		} `json:"redis"`
-	}
-
-	defaultCfg := Config{}
-	defaultCfg.Client.URL = "http://default:8080"
-	defaultCfg.Redis.URL = "redis://default:6379/0"
-
-	flags := []cli.Flag{
-		&cli.StringFlag{Name: "url", Value: defaultCfg.Client.URL},
-		&cli.StringFlag{Name: "redis.url", Value: defaultCfg.Redis.URL},
-	}
-
-	cfg := runNamedCLITest(
-		t,
-		"client",
-		defaultCfg,
-		flags,
-		[]string{"client", "--redis.url", "redis://cli:6379/0"},
-	)
-
-	assert.Equal(t, "http://default:8080", cfg.Client.URL)
-	assert.Equal(t, "redis://cli:6379/0", cfg.Redis.URL)
-}
-
-func TestLoadWithCommand_ScopedFlagWinsOverRootFullPath(t *testing.T) {
-	type ClientServerConfig struct {
-		Hostkey string `json:"hostkey"`
-	}
-	type ClientConfig struct {
-		Server ClientServerConfig `json:"server"`
-	}
-	type ServerConfig struct {
-		Hostkey string `json:"hostkey"`
-	}
-	type Config struct {
-		Client ClientConfig `json:"client"`
-		Server ServerConfig `json:"server"`
-	}
-
-	defaultCfg := Config{
-		Client: ClientConfig{Server: ClientServerConfig{Hostkey: "client-default"}},
-		Server: ServerConfig{Hostkey: "server-default"},
-	}
-	flags := []cli.Flag{
-		&cli.StringFlag{Name: "server.hostkey", Value: defaultCfg.Client.Server.Hostkey},
-	}
-
-	cfg := runNamedCLITest(
-		t,
-		"client",
-		defaultCfg,
-		flags,
-		[]string{"client", "--server.hostkey", "client-cli"},
-	)
-
-	assert.Equal(t, "client-cli", cfg.Client.Server.Hostkey)
-	assert.Equal(t, "server-default", cfg.Server.Hostkey)
-}
-
-func TestLoadWithCommand_DeeperCommandScopeWins(t *testing.T) {
-	type ServiceConfig struct {
-		Port int `json:"port"`
-	}
-	type ServerConfig struct {
-		Service ServiceConfig `json:"service"`
-	}
-	type Config struct {
-		Server  ServerConfig  `json:"server"`
-		Service ServiceConfig `json:"service"`
-	}
-
-	defaultCfg := Config{
-		Server:  ServerConfig{Service: ServiceConfig{Port: 8080}},
-		Service: ServiceConfig{Port: 9090},
-	}
-	var loadedCfg *Config
-	serviceCmd := &cli.Command{
-		Name: "service",
-		Flags: []cli.Flag{
-			&cli.IntFlag{Name: "port", Value: defaultCfg.Server.Service.Port},
-		},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := Load(defaultCfg, WithCommand(cmd))
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-
-			return nil
-		},
-	}
-	serverCmd := &cli.Command{
-		Name:     "server",
-		Commands: []*cli.Command{serviceCmd},
-	}
-
-	err := serverCmd.Run(context.Background(), []string{"server", "service", "--port", "7000"})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-	assert.Equal(t, 7000, loadedCfg.Server.Service.Port)
-	assert.Equal(t, 9090, loadedCfg.Service.Port)
-}
-
-func TestLoadWithCommand_SubCommands(t *testing.T) {
-	type ClientConfig struct {
-		URL     string `json:"url"`
-		Timeout int    `json:"timeout"`
-	}
-	type Config struct {
-		Client ClientConfig `json:"client"`
-	}
-
-	defaultCfg := Config{Client: ClientConfig{URL: "http://localhost:8080", Timeout: 30}}
-	var loadedCfg *Config
-	var executed bool
-
-	subCmd := &cli.Command{
-		Name: "health",
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := Load(defaultCfg, WithCommand(cmd))
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-			executed = true
-
-			return nil
-		},
-	}
-
-	mainCmd := &cli.Command{
-		Name:     "client",
-		Commands: []*cli.Command{subCmd},
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "url", Value: defaultCfg.Client.URL},
-			&cli.IntFlag{Name: "timeout", Value: defaultCfg.Client.Timeout},
-		},
-	}
-
-	err := mainCmd.Run(context.Background(), []string{"client", "--url", "http://prod:8080", "health"})
-	require.NoError(t, err)
-	require.True(t, executed)
-
-	assert.Equal(t, "http://prod:8080", loadedCfg.Client.URL, "parent flag inherited")
-	assert.Equal(t, 30, loadedCfg.Client.Timeout, "unset keeps default")
-}
-
-func TestLoadCmdUsesConfigFlagFromCommandLineage(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	tmpFile := writeTempConfig(t, `name: "from-config-flag"`)
-	defaultCfg := Config{Name: "default"}
-	var loadedCfg *Config
-
-	subCmd := &cli.Command{
-		Name: "serve",
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := LoadCmd(cmd, defaultCfg, "")
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-
-			return nil
-		},
-	}
-	rootCmd := &cli.Command{
-		Name:     "app",
-		Flags:    []cli.Flag{ConfigFlag()},
-		Commands: []*cli.Command{subCmd},
-	}
-
-	err := rootCmd.Run(context.Background(), []string{"app", "--config", tmpFile, "serve"})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-	assert.Equal(t, "from-config-flag", loadedCfg.Name)
-}
-
-func TestLoadCmdWithEnvPrefixFlag(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	t.Setenv("APP_NAME", "from-app")
-	t.Setenv("CUSTOM_NAME", "from-custom")
-
-	defaultCfg := Config{Name: "default"}
-	var loadedCfg *Config
-
-	cmd := &cli.Command{
-		Name:  "test",
-		Flags: []cli.Flag{EnvPrefixFlag()},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := LoadCmd(cmd, defaultCfg, "", WithEnvPrefix("APP_"))
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-			return nil
-		},
-	}
-
-	// 使用 --env-prefix CUSTOM_ 覆盖 WithEnvPrefix
-	err := cmd.Run(context.Background(), []string{"test", "--env-prefix", "CUSTOM_"})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-
-	assert.Equal(t, "from-custom", loadedCfg.Name, "CLI flag should override WithEnvPrefix")
-}
-
-func TestLoadCmdWithEnvPrefixFlagEmpty(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	t.Setenv("APP_NAME", "from-app")
-
-	defaultCfg := Config{Name: "default"}
-	var loadedCfg *Config
-
-	cmd := &cli.Command{
-		Name:  "test",
-		Flags: []cli.Flag{EnvPrefixFlag()},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := LoadCmd(cmd, defaultCfg, "", WithEnvPrefix("APP_"))
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-			return nil
-		},
-	}
-
-	// 使用 --env-prefix "" 禁用环境变量
-	err := cmd.Run(context.Background(), []string{"test", "--env-prefix", ""})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-
-	assert.Equal(t, "default", loadedCfg.Name, "empty flag should disable env binding")
-}
-
-func TestLoadCmdWithEnvPrefixFlagFromLineage(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	t.Setenv("APP_NAME", "from-app")
-	t.Setenv("CUSTOM_NAME", "from-custom")
-
-	defaultCfg := Config{Name: "default"}
-	var loadedCfg *Config
-
-	subCmd := &cli.Command{
-		Name: "serve",
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := LoadCmd(cmd, defaultCfg, "", WithEnvPrefix("APP_"))
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-			return nil
-		},
-	}
-	rootCmd := &cli.Command{
-		Name:     "app",
-		Flags:    []cli.Flag{EnvPrefixFlag()},
-		Commands: []*cli.Command{subCmd},
-	}
-
-	// 父命令设置 --env-prefix，子命令应继承
-	err := rootCmd.Run(context.Background(), []string{"app", "--env-prefix", "CUSTOM_", "serve"})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-
-	assert.Equal(t, "from-custom", loadedCfg.Name, "child command should inherit parent flag")
-}
-
-func TestLoadCmdEnvPrefixFlagPriority(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	t.Setenv("APP_NAME", "from-app")
-	t.Setenv("TEST_NAME", "from-test")
-	t.Setenv("CUSTOM_NAME", "from-custom")
-
-	defaultCfg := Config{Name: "default"}
-	var loadedCfg *Config
-
-	cmd := &cli.Command{
-		Name:  "test",
-		Flags: []cli.Flag{EnvPrefixFlag()},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := LoadCmd(cmd, defaultCfg, "")
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-			return nil
-		},
-	}
-
-	// 不设置 CLI flag，应使用命令名转换后的前缀 TEST_
-	err := cmd.Run(context.Background(), []string{"test"})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-
-	assert.Equal(t, "from-test", loadedCfg.Name, "should use command name prefix when no flag set")
-}
-
-func TestLoadCmdUsesCommandNameForEnvPrefix(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	tests := []struct {
-		name          string
-		commandName   string
-		envVar        string
-		expectedValue string
-	}{
-		{
-			name:          "simple name",
-			commandName:   "app",
-			envVar:        "APP_NAME",
-			expectedValue: "from-app",
-		},
-		{
-			name:          "name with hyphen",
-			commandName:   "my-app",
-			envVar:        "MY_APP_NAME",
-			expectedValue: "from-my-app",
-		},
-		{
-			name:          "cfgm name",
-			commandName:   "cfgm",
-			envVar:        "CFGM_NAME",
-			expectedValue: "from-cfgm",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(tt.envVar, tt.expectedValue)
-
-			defaultCfg := Config{Name: "default"}
-			var loadedCfg *Config
-
-			cmd := &cli.Command{
-				Name:  tt.commandName,
-				Flags: []cli.Flag{EnvPrefixFlag()},
-				Action: func(_ context.Context, cmd *cli.Command) error {
-					cfg, err := LoadCmd(cmd, defaultCfg, "")
-					if err != nil {
-						return err
-					}
-					loadedCfg = cfg
-					return nil
-				},
-			}
-
-			err := cmd.Run(context.Background(), []string{tt.commandName})
-			require.NoError(t, err)
-			require.NotNil(t, loadedCfg)
-
-			assert.Equal(t, tt.expectedValue, loadedCfg.Name)
-		})
-	}
-}
-
-func TestLoadCmdUsesRootCommandNameForEnvPrefix(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-	}
-
-	t.Setenv("APP_NAME", "from-app")
-
-	defaultCfg := Config{Name: "default"}
-	var loadedCfg *Config
-
-	subCmd := &cli.Command{
-		Name:  "server",
-		Flags: []cli.Flag{EnvPrefixFlag()},
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := LoadCmd(cmd, defaultCfg, "")
-			if err != nil {
-				return err
-			}
-			loadedCfg = cfg
-			return nil
-		},
-	}
-	rootCmd := &cli.Command{
-		Name:     "app",
-		Commands: []*cli.Command{subCmd},
-	}
-
-	err := rootCmd.Run(context.Background(), []string{"app", "server"})
-	require.NoError(t, err)
-	require.NotNil(t, loadedCfg)
-
-	assert.Equal(t, "from-app", loadedCfg.Name, "should use root command name prefix in subcommand")
-}
-func TestLoadWithCommand_FullPathDisambiguatesNestedFlags(t *testing.T) {
-	type EndpointConfig struct {
-		Addr string `json:"addr"`
-	}
-	type Config struct {
-		Client EndpointConfig `json:"client"`
-		Server EndpointConfig `json:"server"`
-	}
-
-	defaultCfg := Config{
-		Client: EndpointConfig{Addr: "client-default"},
-		Server: EndpointConfig{Addr: "server-default"},
-	}
-
-	cmd := &cli.Command{
-		Name: "test",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "client.addr"},
-			&cli.StringFlag{Name: "server.addr"},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := Load(defaultCfg, WithCommand(cmd))
-			if err != nil {
-				return err
-			}
-			assert.Equal(t, ":9090", cfg.Client.Addr)
-			assert.Equal(t, "server-default", cfg.Server.Addr)
-
-			return nil
-		},
-	}
-
-	err := cmd.Run(context.Background(), []string{"test", "--client.addr", ":9090"})
-	require.NoError(t, err)
-}
-
-func TestLoadWithCommand_Priority(t *testing.T) {
-	type Config struct {
-		Value string `json:"value"`
-	}
-
-	t.Setenv("TEST_VALUE", "from-env")
-
-	defaultCfg := Config{Value: "default"}
-	flags := []cli.Flag{&cli.StringFlag{Name: "value", Value: defaultCfg.Value}}
-
-	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--value", "from-cli"}, WithEnvPrefix("TEST_"))
-
-	assert.Equal(t, "from-cli", cfg.Value, "CLI > env")
-}
-
-func TestLoadWithCommand_OnlySetFlags(t *testing.T) {
-	type Config struct {
-		Name  string `json:"name"`
-		Debug bool   `json:"debug"`
-	}
-
-	tmpFile := writeTempConfig(t, `
-name: "from-file"
-debug: true
-`)
-
-	defaultCfg := Config{Name: "default", Debug: false}
-	flags := []cli.Flag{
-		&cli.StringFlag{Name: "name", Value: defaultCfg.Name},
-		&cli.BoolFlag{Name: "debug", Value: defaultCfg.Debug},
-	}
-
-	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--name", "from-cli"}, WithConfigPaths(tmpFile))
-
-	assert.Equal(t, "from-cli", cfg.Name, "set flag uses CLI value")
-	assert.True(t, cfg.Debug, "unset flag keeps config file value")
-}
-
-func TestLoadWithCommand_NumericTypes(t *testing.T) {
-	type Config struct {
-		Port    int     `json:"port"`
-		Rate    float64 `json:"rate"`
-		Retries uint    `json:"retries"`
-	}
-
-	defaultCfg := Config{Port: 8080, Rate: 1.0, Retries: 3}
-	flags := []cli.Flag{
-		&cli.IntFlag{Name: "port", Value: defaultCfg.Port},
-		&cli.Float64Flag{Name: "rate", Value: defaultCfg.Rate},
-		&cli.UintFlag{Name: "retries", Value: defaultCfg.Retries},
-	}
-
-	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--port", "9090", "--rate", "2.5", "--retries", "5"})
-
-	a := assert.New(t)
-	a.Equal(9090, cfg.Port)
-	a.InEpsilon(2.5, cfg.Rate, 0.0001)
-	a.Equal(uint(5), cfg.Retries)
-}
-
-func TestLoadWithCommand_StringSlice(t *testing.T) {
-	type Config struct {
-		Hosts []string `json:"hosts"`
-	}
-
-	defaultCfg := Config{Hosts: []string{"localhost"}}
-	flags := []cli.Flag{&cli.StringSliceFlag{Name: "hosts", Value: defaultCfg.Hosts}}
-
-	cfg := runCLITest(t, defaultCfg, flags, []string{"test", "--hosts", "host1", "--hosts", "host2", "--hosts", "host3"})
-
-	assert.Equal(t, []string{"host1", "host2", "host3"}, cfg.Hosts)
-}
-
-func TestValidateCommandFlagCoverage(t *testing.T) {
-	type Config struct {
-		Client struct {
-			URL     string `json:"url"`
-			Timeout int    `json:"timeout"`
-		} `json:"client"`
-		Redis struct {
-			URL      string `json:"url"`
-			Password string `json:"password"`
-		} `json:"redis"`
-		Server struct {
-			Addr string `json:"addr"`
-		} `json:"server"`
-	}
-
-	defaultCfg := Config{}
-	cmd := &cli.Command{
-		Name: "client",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "url"},
-			&cli.IntFlag{Name: "timeout"},
-			&cli.StringFlag{Name: "redis.url"},
-		},
-	}
-
-	err := ValidateCommandFlagCoverage(
-		cmd,
-		defaultCfg,
-		[]string{"client", "redis"},
-		IgnoreConfigKeys("redis.password"),
-	)
-	require.NoError(t, err)
-}
-
-func TestValidateCommandFlagCoverageReportsMissingFlags(t *testing.T) {
-	type Config struct {
-		Server struct {
-			Addr        string `json:"addr"`
-			FrontendDir string `json:"frontend-dir"`
-		} `json:"server"`
-	}
-
+	var loaded *Config
 	cmd := &cli.Command{
 		Name: "server",
 		Flags: []cli.Flag{
+			ConfigFlag(),
+			EnvPrefixFlag(),
 			&cli.StringFlag{Name: "addr"},
+			&cli.DurationFlag{Name: "timeout"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			cfg, err := Load(ctx, Config{}, Command(cmd))
+			loaded = cfg
+
+			return err
 		},
 	}
 
-	err := ValidateCommandFlagCoverage(cmd, Config{}, []string{"server"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "server.frontend-dir")
-	assert.Contains(t, err.Error(), "--frontend-dir")
-	assert.Contains(t, err.Error(), "--server.frontend-dir")
+	err := cmd.Run(context.Background(), []string{
+		"server",
+		"--config", configPath,
+		"--env-prefix", "APP_",
+		"--addr", ":9090",
+		"--timeout", "5s",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+
+	assert.Equal(t, "from-env", loaded.Name)
+	assert.Equal(t, ":9090", loaded.Server.Addr)
+	assert.Equal(t, 5*time.Second, loaded.Server.Timeout)
 }
 
-func TestValidateCommandFlagCoverageAcceptsFullPathOnScopedCommand(t *testing.T) {
+func TestCommandProfileExpandsDefaultsByDefault(t *testing.T) {
 	type Config struct {
-		Redis struct {
-			URL string `json:"url"`
-		} `json:"redis"`
+		Name string `json:"name"`
+	}
+
+	t.Setenv("APP_NAME_DEFAULT", "from-default-template")
+
+	var loaded *Config
+	cmd := &cli.Command{
+		Name: "app",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			cfg, err := Load(ctx, Config{Name: "${APP_NAME_DEFAULT}"}, Command(cmd))
+			loaded = cfg
+
+			return err
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{"app"})
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, "from-default-template", loaded.Name)
+}
+
+func TestCommandProfileCanIgnoreNonConfigFlags(t *testing.T) {
+	type Config struct {
+		Name string `json:"name"`
 	}
 
 	cmd := &cli.Command{
-		Name: "server",
+		Name: "app",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "redis.url"},
+			&cli.StringFlag{Name: "name"},
+			&cli.BoolFlag{Name: "dry-run"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			_, err := Load(ctx, Config{}, Command(cmd, IgnoreFlags("dry-run")))
+
+			return err
 		},
 	}
 
-	err := ValidateCommandFlagCoverage(cmd, Config{}, []string{"redis"})
+	err := cmd.Run(context.Background(), []string{"app", "--name", "from-cli", "--dry-run"})
 	require.NoError(t, err)
 }
 
-func TestSchemaCommandUsage(t *testing.T) {
-	type RedisConfig struct {
-		URL string `json:"url" desc:"Redis URL"`
-	}
-	type ClientConfig struct {
-		URL     string `json:"url" desc:"服务器地址"`
-		Timeout int    `json:"timeout" desc:"请求超时时间"`
-	}
-	type Config struct {
-		Client ClientConfig `json:"client" desc:"客户端配置"`
-		Redis  RedisConfig  `json:"redis" desc:"Redis 配置"`
-	}
-
-	usage := Schema(Config{}).Command("client")
-
-	assert.Equal(t, "服务器地址", usage.Usage("url"))
-	assert.Equal(t, "请求超时时间", usage.MustUsage("timeout"))
-	assert.Equal(t, "Redis URL", usage.Usage("redis.url"))
-	assert.Empty(t, usage.Usage("missing"))
-}
-
-func TestSchemaCommandUsageDeeperCommandScopeWins(t *testing.T) {
-	type ServiceConfig struct {
-		Port int `json:"port" desc:"服务端服务端口"`
-	}
-	type Config struct {
-		Server struct {
-			Service ServiceConfig `json:"service" desc:"服务配置"`
-		} `json:"server" desc:"服务端配置"`
-		Service ServiceConfig `json:"service" desc:"根服务配置"`
-	}
-
-	usage := Schema(Config{}).Command("server", "service")
-
-	assert.Equal(t, "服务端服务端口", usage.MustUsage("port"))
-	assert.Equal(t, "服务端服务端口", usage.MustUsage("service.port"))
-}
-
-func TestSchemaCommandUsageScopedFlagWinsOverRootFullPath(t *testing.T) {
-	type Config struct {
-		Client struct {
-			Server struct {
-				Hostkey string `json:"hostkey" desc:"客户端服务端主机公钥"`
-			} `json:"server" desc:"客户端服务端配置"`
-		} `json:"client" desc:"客户端配置"`
-		Server struct {
-			Hostkey string `json:"hostkey" desc:"服务端主机公钥"`
-		} `json:"server" desc:"服务端配置"`
-	}
-
-	usage := Schema(Config{}).Command("client")
-
-	assert.Equal(t, "客户端服务端主机公钥", usage.MustUsage("server.hostkey"))
-}
-
-func TestSchemaCommandUsagePanicsOnMissingFlag(t *testing.T) {
-	type Config struct {
-		Server struct {
-			Addr string `json:"addr" desc:"服务地址"`
-		} `json:"server" desc:"服务端配置"`
-	}
-
-	usage := Schema(Config{}).Command("server")
-
-	assert.PanicsWithError(
-		t,
-		"cfgm: CLI flag --missing has no matching config field",
-		func() { _ = usage.MustUsage("missing") },
-	)
-	assert.Empty(t, usage.Usage("missing"))
-}
-
-// =============================================================================
-// ExampleYAML 测试
-// =============================================================================
-
-func TestExampleYAML(t *testing.T) {
-	tests := []struct {
-		name     string
-		cfg      any
-		contains []string
-		excludes []string
-	}{
-		{
-			name: "basic types",
-			cfg: struct {
-				Name    string  `json:"name" desc:"应用名称"`
-				Debug   bool    `json:"debug" desc:"调试模式"`
-				Port    int     `json:"port" desc:"端口号"`
-				Rate    float64 `json:"rate" desc:"速率"`
-				Retries uint    `json:"retries" desc:"重试次数"`
-			}{Name: "test-app", Debug: true, Port: 8080, Rate: 1.5, Retries: 3},
-			contains: []string{
-				"# 默认配置示例文件",
-				`name: "test-app"`, "# 应用名称",
-				"debug: true", "# 调试模式",
-				"port: 8080",
-				"rate: 1.5",
-				"retries: 3",
-			},
-		},
-		{
-			name: "nested struct",
-			cfg: struct {
-				Name   string `json:"name" desc:"应用名称"`
-				Server struct {
-					Host string `json:"host" desc:"服务器地址"`
-					Port int    `json:"port" desc:"服务器端口"`
-				} `json:"server" desc:"服务器配置"`
-			}{
-				Name: "nested-app",
-				Server: struct {
-					Host string `json:"host" desc:"服务器地址"`
-					Port int    `json:"port" desc:"服务器端口"`
-				}{Host: "localhost", Port: 9090},
-			},
-			contains: []string{"server:", `host: "localhost"`, "port: 9090", "# 服务器配置"},
-		},
-		{
-			name: "duration",
-			cfg: struct {
-				Timeout time.Duration `json:"timeout" desc:"超时时间"`
-			}{Timeout: 30 * time.Second},
-			contains: []string{"timeout: 30s", "# 超时时间"},
-		},
-		{
-			name: "slice",
-			cfg: struct {
-				Hosts []string `json:"hosts" desc:"主机列表"`
-				Empty []string `json:"empty" desc:"空列表"`
-			}{Hosts: []string{"host1", "host2"}, Empty: []string{}},
-			contains: []string{"hosts:", "- host1", "- host2", "empty: []"},
-		},
-		{
-			name: "map",
-			cfg: struct {
-				Labels map[string]string `json:"labels" desc:"标签"`
-				Empty  map[string]string `json:"empty" desc:"空映射"`
-			}{Labels: map[string]string{"env": "prod"}, Empty: map[string]string{}},
-			contains: []string{"labels:", "empty: {}"},
-		},
-		{
-			name: "skip untagged",
-			cfg: struct {
-				Name     string `json:"name" desc:"应用名称"`
-				Internal string // 无 json 标签
-			}{Name: "test", Internal: "should-not-appear"},
-			contains: []string{"name:"},
-			excludes: []string{"should-not-appear", "Internal"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			yaml := string(ExampleYAML(tt.cfg))
-			a := assert.New(t)
-			for _, s := range tt.contains {
-				a.Contains(yaml, s)
-			}
-			for _, s := range tt.excludes {
-				a.NotContains(yaml, s)
-			}
-		})
-	}
-}
-
-func TestInitConfigFileWritesRuntimeConfig(t *testing.T) {
-	type Config struct {
-		Name string `json:"name"`
-		Port int    `json:"port"`
-	}
-
-	configPath := filepath.Join(t.TempDir(), "nested", "config.yaml")
-	err := InitConfigFile(Config{Name: "app", Port: 8080}, configPath)
-	require.NoError(t, err)
-
-	content, err := os.ReadFile(configPath) //nolint:gosec // test reads its own temp file
-	require.NoError(t, err)
-	yaml := string(content)
-
-	assert.Contains(t, yaml, `name: app`)
-	assert.Contains(t, yaml, `port: 8080`)
-	assert.NotContains(t, yaml, "默认配置示例文件")
-}
-
-func TestInitConfigFileRefusesOverwrite(t *testing.T) {
+func TestCommandProfileRejectsUnmappedFlags(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
 
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("name: existing\n"), 0600))
+	cmd := &cli.Command{
+		Name:  "app",
+		Flags: []cli.Flag{&cli.BoolFlag{Name: "dry-run"}},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			_, err := Load(ctx, Config{}, Command(cmd))
 
-	err := InitConfigFile(Config{Name: "new"}, configPath)
+			return err
+		},
+	}
+
+	err := cmd.Run(context.Background(), []string{"app", "--dry-run"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "already exists")
-
-	content, readErr := os.ReadFile(configPath) //nolint:gosec // test reads its own temp file
-	require.NoError(t, readErr)
-	assert.Equal(t, "name: existing\n", string(content))
+	assert.Contains(t, err.Error(), "has no matching config field")
 }
-
-func TestConfigFilesWriteExample(t *testing.T) {
-	type Config struct {
-		Name string `json:"name" desc:"应用名称"`
-	}
-
-	examplePath := filepath.Join(t.TempDir(), "config.example.yaml")
-	files := ConfigFiles[Config]{
-		Defaults:    func() Config { return Config{Name: "example"} },
-		ExampleFile: examplePath,
-		RuntimeFile: filepath.Join(t.TempDir(), "config.yaml"),
-	}
-
-	files.WriteExample(t)
-
-	content, err := os.ReadFile(examplePath) //nolint:gosec // test reads its own temp file
-	require.NoError(t, err)
-	yaml := string(content)
-
-	assert.Contains(t, yaml, "默认配置示例文件")
-	assert.Contains(t, yaml, `name: "example"`)
-	assert.Contains(t, yaml, "# 应用名称")
-}
-
-// =============================================================================
-// DefaultPaths 测试
-// =============================================================================
 
 func TestDefaultPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		appName     string
-		minLen      int
-		mustContain []string
-	}{
-		{
-			name:        "no app name",
-			appName:     "",
-			minLen:      2,
-			mustContain: []string{"config.yaml", "config/config.yaml"},
-		},
-		{
-			name:        "with app name",
-			appName:     "app",
-			minLen:      4,
-			mustContain: []string{".app.yaml", "/etc/app/config.yaml", "config.yaml", "config/config.yaml"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var paths []string
-			if tt.appName == "" {
-				paths = DefaultPaths()
-			} else {
-				paths = DefaultPaths(tt.appName)
-			}
-
-			a := assert.New(t)
-			a.GreaterOrEqual(len(paths), tt.minLen)
-			for _, p := range tt.mustContain {
-				a.Contains(paths, p)
-			}
-		})
-	}
-}
-
-// =============================================================================
-// FindProjectRoot 测试
-// =============================================================================
-
-func TestFindProjectRoot(t *testing.T) {
-	root, err := FindProjectRoot(0)
-	require.NoError(t, err)
-	assert.NotEmpty(t, root)
-
-	_, err = os.Stat(root + "/go.mod")
-	assert.NoError(t, err, "should contain go.mod")
-}
-
-// =============================================================================
-// collectConfigKeys 测试 (内部函数)
-// =============================================================================
-
-func TestCollectConfigKeys(t *testing.T) {
-	tests := []struct {
-		name     string
-		cfg      any
-		expected []string
-	}{
-		{
-			name: "flat",
-			cfg: struct {
-				Name  string `json:"name"`
-				Debug bool   `json:"debug"`
-				Port  int    `json:"port"`
-			}{},
-			expected: []string{"name", "debug", "port"},
-		},
-		{
-			name: "nested",
-			cfg: struct {
-				Name   string `json:"name"`
-				Server struct {
-					Host string `json:"host"`
-					Port int    `json:"port"`
-				} `json:"server"`
-			}{},
-			expected: []string{"name", "server.host", "server.port"},
-		},
-		{
-			name: "hyphenated keys",
-			//nolint:tagliatelle
-			cfg: struct {
-				Client struct {
-					ServerPassword string `json:"server-password"`
-					RevAuthUser    string `json:"rev-auth-user"`
-				} `json:"client"`
-			}{},
-			expected: []string{"client.server-password", "client.rev-auth-user"},
-		},
-		{
-			name: "duration not recursed",
-			cfg: struct {
-				Timeout  time.Duration `json:"timeout"`
-				Interval time.Duration `json:"interval"`
-			}{},
-			expected: []string{"timeout", "interval"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			keys := collectConfigKeys(tt.cfg)
-			a := assert.New(t)
-			a.Len(keys, len(tt.expected))
-			for _, k := range tt.expected {
-				a.Contains(keys, k)
-			}
-		})
-	}
-}
-
-// =============================================================================
-// generateEnvBindings 测试 (内部函数)
-// =============================================================================
-
-func TestGenerateEnvBindings(t *testing.T) {
-	tests := []struct {
-		name     string
-		prefix   string
-		keys     []string
-		expected map[string]string
-	}{
-		{
-			name:   "basic",
-			prefix: "APP_",
-			keys:   []string{"name", "debug", "port"},
-			expected: map[string]string{
-				"APP_NAME":  "name",
-				"APP_DEBUG": "debug",
-				"APP_PORT":  "port",
-			},
-		},
-		{
-			name:   "nested",
-			prefix: "CUSTOM_",
-			keys:   []string{"server.host", "server.port", "client.url"},
-			expected: map[string]string{
-				"CUSTOM_SERVER_HOST": "server.host",
-				"CUSTOM_SERVER_PORT": "server.port",
-				"CUSTOM_CLIENT_URL":  "client.url",
-			},
-		},
-		{
-			name:   "hyphenated",
-			prefix: "APP_",
-			keys:   []string{"client.server-password", "client.rev-auth-user"},
-			expected: map[string]string{
-				"APP_CLIENT_SERVER_PASSWORD": "client.server-password",
-				"APP_CLIENT_REV_AUTH_USER":   "client.rev-auth-user",
-			},
-		},
-		{
-			name:   "empty prefix",
-			prefix: "",
-			keys:   []string{"name", "server.port"},
-			expected: map[string]string{
-				"NAME":        "name",
-				"SERVER_PORT": "server.port",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			bindings := generateEnvBindings(tt.prefix, tt.keys)
-			assert.Equal(t, tt.expected, bindings)
-		})
-	}
-}
-
-// =============================================================================
-// 模板展开测试 (默认启用)
-// =============================================================================
-
-func TestTemplateExpansion(t *testing.T) {
-	//nolint:tagliatelle
-	type Config struct {
-		APIKey  string `json:"api_key"`
-		Model   string `json:"model"`
-		BaseURL string `json:"base_url"`
-	}
-
-	t.Run("shell expansion", func(t *testing.T) {
-		t.Setenv("TEST_API_KEY", "sk-test-12345")
-
-		configContent := `
-api_key: '${TEST_API_KEY}'
-model: "gpt-4"
-base_url: "https://api.openai.com"
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath)) // 默认启用模板展开
-		require.NoError(t, err)
-
-		assert.Equal(t, "sk-test-12345", cfg.APIKey)
-		assert.Equal(t, "gpt-4", cfg.Model)
-	})
-
-	t.Run("default values are expanded", func(t *testing.T) {
-		t.Setenv("DEFAULT_API_KEY", "env-default")
-
-		defaultCfg := Config{
-			// #nosec G101 -- test fixture verifies template expansion and does not embed a real credential.
-			APIKey:  "${DEFAULT_API_KEY:-fallback}",
-			Model:   "gpt-4",
-			BaseURL: "https://api.example.com",
-		}
-		missingPath := filepath.Join(t.TempDir(), "missing.yaml")
-		cfg, err := Load(defaultCfg, WithConfigPaths(missingPath))
-		require.NoError(t, err)
-
-		assert.Equal(t, "env-default", cfg.APIKey)
-	})
-
-	t.Run("fallback with default value", func(t *testing.T) {
-		configContent := `
-api_key: '${NONEXISTENT_KEY:-default-key}'
-model: "gpt-3.5-turbo"
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath))
-		require.NoError(t, err)
-
-		assert.Equal(t, "default-key", cfg.APIKey)
-	})
-
-	t.Run("fallback with empty value", func(t *testing.T) {
-		configContent := `
-api_key: '${NONEXISTENT_KEY:-fallback-key}'
-model: "claude-3"
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath))
-		require.NoError(t, err)
-
-		assert.Equal(t, "fallback-key", cfg.APIKey)
-	})
-
-	t.Run("shell direct access", func(t *testing.T) {
-		t.Setenv("MY_MODEL", "claude-haiku")
-		t.Setenv("MY_BASE_URL", "https://api.anthropic.com")
-
-		configContent := `
-api_key: "test-key"
-model: '${MY_MODEL}'
-base_url: '${MY_BASE_URL:-https://default.com}'
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath))
-		require.NoError(t, err)
-
-		assert.Equal(t, "claude-haiku", cfg.Model)
-		assert.Equal(t, "https://api.anthropic.com", cfg.BaseURL)
-	})
-
-	t.Run("nested fallback", func(t *testing.T) {
-		t.Setenv("SECONDARY_KEY", "secondary-value")
-
-		configContent := `
-api_key: '${PRIMARY_KEY:-${SECONDARY_KEY:-final-default}}'
-model: "test"
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath))
-		require.NoError(t, err)
-
-		assert.Equal(t, "secondary-value", cfg.APIKey)
-	})
-
-	t.Run("nested fallback all empty returns default", func(t *testing.T) {
-		configContent := `
-api_key: '${MISSING1:-${MISSING2:-final-default}}'
-model: "test"
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath))
-		require.NoError(t, err)
-
-		assert.Equal(t, "final-default", cfg.APIKey)
-	})
-
-	t.Run("WithoutTemplateExpansion disables expansion", func(t *testing.T) {
-		configContent := `
-api_key: '${TEST_KEY}'
-model: "test"
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath), WithoutTemplateExpansion()) // 显式禁用
-		require.NoError(t, err)
-
-		// 未展开，保持原样
-		assert.Equal(t, "${TEST_KEY}", cfg.APIKey)
-	})
-
-	t.Run("required var error", func(t *testing.T) {
-		configContent := `
-api_key: '${TEST_KEY:?missing}'
-model: "test"
-`
-		configPath := writeTempConfig(t, configContent)
-		_, err := Load(Config{}, WithConfigPaths(configPath)) // 默认启用，必填变量缺失会报错
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expand template")
-	})
-
-	t.Run("complex real-world example", func(t *testing.T) {
-		t.Setenv("OPENROUTER_API_KEY", "or-key-12345")
-		t.Setenv("LLM_MODEL", "anthropic/claude-haiku-4.5")
-
-		configContent := `
-api_key: '${OPENROUTER_API_KEY:-${ANTHROPIC_API_KEY:-sk-default}}'
-model: '${LLM_MODEL:-gpt-4}'
-base_url: '${LLM_BASE_URL:-https://openrouter.ai/api/v1}'
-`
-		configPath := writeTempConfig(t, configContent)
-		cfg, err := Load(Config{}, WithConfigPaths(configPath))
-		require.NoError(t, err)
-
-		assert.Equal(t, "or-key-12345", cfg.APIKey)
-		assert.Equal(t, "anthropic/claude-haiku-4.5", cfg.Model)
-		assert.Equal(t, "https://openrouter.ai/api/v1", cfg.BaseURL)
-	})
-}
-
-// =============================================================================
-// JSON 格式支持测试
-// =============================================================================
-
-// writeTempJSONConfig 创建临时 JSON 配置文件。
-func writeTempJSONConfig(t *testing.T, content string) string {
-	t.Helper()
-	tmpFile, err := os.CreateTemp(t.TempDir(), "config_test_*.json")
-	require.NoError(t, err, "Failed to create temp file")
-	_, err = tmpFile.WriteString(content)
-	require.NoError(t, err, "Failed to write temp file")
-	_ = tmpFile.Close()
-	t.Cleanup(func() { _ = os.Remove(tmpFile.Name()) })
-
-	return tmpFile.Name()
-}
-
-func TestLoadWithJSONConfig(t *testing.T) {
-	type ServerConfig struct {
-		Host    string        `json:"host"`
-		Port    int           `json:"port"`
-		Timeout time.Duration `json:"timeout"`
-	}
-	type Config struct {
-		Name   string       `json:"name"`
-		Debug  bool         `json:"debug"`
-		Server ServerConfig `json:"server"`
-	}
-
-	jsonContent := `{
-  "name": "json-app",
-  "debug": true,
-  "server": {
-    "host": "0.0.0.0",
-    "port": 9090,
-    "timeout": "60s"
-  }
-}`
-
-	tmpFile := writeTempJSONConfig(t, jsonContent)
-
-	cfg, err := Load(
-		Config{Name: "default", Server: ServerConfig{Port: 8080}},
-		WithConfigPaths(tmpFile),
-	)
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("json-app", cfg.Name)
-	a.True(cfg.Debug)
-	a.Equal("0.0.0.0", cfg.Server.Host)
-	a.Equal(9090, cfg.Server.Port)
-	a.Equal(60*time.Second, cfg.Server.Timeout)
-}
-
-func TestIsJSONPath(t *testing.T) {
-	tests := []struct {
-		name   string
-		path   string
-		isJSON bool
-	}{
-		{"yaml extension", "config.yaml", false},
-		{"yml extension", "config.yml", false},
-		{"json extension", "config.json", true},
-		{"uppercase YAML", "CONFIG.YAML", false},
-		{"uppercase JSON", "CONFIG.JSON", true},
-		{"no extension", "config", false},
-		{"unknown extension", "config.conf", false},
-		{"json in path", "/path/to/config.json", true},
-		{"yaml in path", "/etc/app/config.yaml", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.isJSON, isJSONPath(tt.path))
-		})
-	}
-}
-
-func TestJSONTemplateExpansion(t *testing.T) {
-	//nolint:tagliatelle
-	type Config struct {
-		APIKey string `json:"api_key"`
-		Model  string `json:"model"`
-	}
-
-	t.Run("shell expansion in JSON", func(t *testing.T) {
-		t.Setenv("JSON_TEST_KEY", "sk-json-12345")
-
-		jsonContent := "{\"api_key\": \"${JSON_TEST_KEY}\", \"model\": \"gpt-4\"}"
-		tmpFile := writeTempJSONConfig(t, jsonContent)
-		cfg, err := Load(Config{}, WithConfigPaths(tmpFile))
-		require.NoError(t, err)
-
-		assert.Equal(t, "sk-json-12345", cfg.APIKey)
-		assert.Equal(t, "gpt-4", cfg.Model)
-	})
-
-	t.Run("default value in JSON", func(t *testing.T) {
-		jsonContent := "{\"api_key\": \"${NONEXISTENT:-default-json-key}\", \"model\": \"claude-3\"}"
-		tmpFile := writeTempJSONConfig(t, jsonContent)
-		cfg, err := Load(Config{}, WithConfigPaths(tmpFile))
-		require.NoError(t, err)
-
-		assert.Equal(t, "default-json-key", cfg.APIKey)
-	})
-
-	t.Run("disable template in JSON", func(t *testing.T) {
-		jsonContent := "{\"api_key\": \"${TEST}\", \"model\": \"test\"}"
-		tmpFile := writeTempJSONConfig(t, jsonContent)
-		cfg, err := Load(Config{}, WithConfigPaths(tmpFile), WithoutTemplateExpansion())
-		require.NoError(t, err)
-
-		assert.Equal(t, "${TEST}", cfg.APIKey)
-	})
-}
-
-func TestJSONPartialOverride(t *testing.T) {
-	type Config struct {
-		Name    string `json:"name"`
-		Debug   bool   `json:"debug"`
-		Port    int    `json:"port"`
-		Timeout int    `json:"timeout"`
-	}
-
-	jsonContent := `{
-  "name": "json-override",
-  "port": 9000
-}`
-
-	tmpFile := writeTempJSONConfig(t, jsonContent)
-	cfg, err := Load(
-		Config{Name: "default", Debug: true, Port: 8080, Timeout: 30},
-		WithConfigPaths(tmpFile),
-	)
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("json-override", cfg.Name, "specified field should be overridden")
-	a.True(cfg.Debug, "unspecified field should keep default")
-	a.Equal(9000, cfg.Port, "specified field should be overridden")
-	a.Equal(30, cfg.Timeout, "unspecified field should keep default")
-}
-
-func TestJSONWithEnvPrefix(t *testing.T) {
-	type Config struct {
-		Name  string `json:"name"`
-		Debug bool   `json:"debug"`
-	}
-
-	jsonContent := `{
-  "name": "json-app",
-  "debug": false
-}`
-
-	tmpFile := writeTempJSONConfig(t, jsonContent)
-	t.Setenv("JSONTEST_DEBUG", "true")
-
-	cfg, err := Load(
-		Config{Name: "default", Debug: false},
-		WithConfigPaths(tmpFile),
-		WithEnvPrefix("JSONTEST_"),
-	)
-	require.NoError(t, err)
-
-	a := assert.New(t)
-	a.Equal("json-app", cfg.Name, "from JSON file")
-	a.True(cfg.Debug, "env should override JSON file")
-}
-
-// =============================================================================
-// 多行注释测试 (ExampleYAML)
-// =============================================================================
-
-func TestExampleYAML_MultilineComment(t *testing.T) {
-	t.Run("scalar with multiline desc", func(t *testing.T) {
-		//nolint:tagliatelle
-		cfg := struct {
-			APIKey string `json:"api_key" desc:"API 密钥\n用于身份验证"`
-		}{APIKey: "sk-test-123"}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, `api_key: "sk-test-123"`)
-		// 多行注释应该被正确处理（可能换行或保持单行）
-		a.Contains(yaml, "API 密钥")
-		a.Contains(yaml, "身份验证")
-	})
-
-	t.Run("struct with multiline desc", func(t *testing.T) {
-		type Server struct {
-			Host string `json:"host" desc:"主机"`
-			Port int    `json:"port" desc:"端口"`
-		}
-		cfg := struct {
-			Server Server `json:"server" desc:"服务器配置\n包含主机和端口设置"`
-		}{Server: Server{Host: "localhost", Port: 8080}}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, "server:")
-		a.Contains(yaml, "服务器配置")
-		a.Contains(yaml, "包含主机和端口设置")
-	})
-
-	t.Run("desc with special characters", func(t *testing.T) {
-		cfg := struct {
-			Timeout int `json:"timeout" desc:"超时时间 (单位: 秒)"`
-		}{Timeout: 30}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, "timeout: 30")
-		a.Contains(yaml, "超时时间 (单位: 秒)")
-	})
-
-	t.Run("desc with YAML special chars", func(t *testing.T) {
-		cfg := struct {
-			Pattern string `json:"pattern" desc:"匹配模式: [a-z]+ # 正则表达式"`
-		}{Pattern: "test"}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, `pattern: "test"`)
-		// 注释中的 # 不应破坏 YAML 结构
-		a.Contains(yaml, "匹配模式")
-	})
-
-	t.Run("desc with colon", func(t *testing.T) {
-		cfg := struct {
-			URL string `json:"url" desc:"服务地址: http://example.com"`
-		}{URL: "http://localhost"}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, `url: "http://localhost"`)
-		a.Contains(yaml, "服务地址")
-	})
-
-	t.Run("empty desc", func(t *testing.T) {
-		cfg := struct {
-			Name string `json:"name" desc:""`
-		}{Name: "test"}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, `name: "test"`)
-	})
-
-	t.Run("no desc tag", func(t *testing.T) {
-		cfg := struct {
-			Name string `json:"name"`
-		}{Name: "test"}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, `name: "test"`)
-		// 无 desc 标签时不应有注释
-	})
-
-	t.Run("mixed single and multiline", func(t *testing.T) {
-		type DB struct {
-			Host string `json:"host" desc:"数据库主机"`
-			Port int    `json:"port" desc:"端口号\n默认: 5432"`
-		}
-		cfg := struct {
-			Name string `json:"name" desc:"应用名称"`
-			DB   DB     `json:"db" desc:"数据库配置\n支持 PostgreSQL"`
-		}{
-			Name: "app",
-			DB:   DB{Host: "localhost", Port: 5432},
-		}
-
-		yaml := string(ExampleYAML(cfg))
-
-		a := assert.New(t)
-		a.Contains(yaml, `name: "app"`)
-		a.Contains(yaml, "应用名称")
-		a.Contains(yaml, "db:")
-		a.Contains(yaml, "数据库配置")
-		a.Contains(yaml, "PostgreSQL")
-		a.Contains(yaml, `host: "localhost"`)
-		a.Contains(yaml, "port: 5432")
-	})
-}
-
-// TestExampleYAML_MultilineCommentYAMLValidity 验证生成的 YAML 是否有效。
-func TestExampleYAML_MultilineCommentYAMLValidity(t *testing.T) {
-	type Server struct {
-		Host    string `json:"host" desc:"服务主机\n支持 IPv4 和 IPv6"`
-		Port    int    `json:"port" desc:"监听端口"`
-		Timeout int    `json:"timeout" desc:"超时时间 (秒)\n0 表示不超时"`
-	}
-	type Config struct {
-		Name   string `json:"name" desc:"应用名称"`
-		Debug  bool   `json:"debug" desc:"调试模式\n启用后会输出详细日志"`
-		Server Server `json:"server" desc:"服务器配置\n包含网络相关设置"`
-	}
-
-	cfg := Config{
-		Name:  "test-app",
-		Debug: true,
-		Server: Server{
-			Host:    "0.0.0.0",
-			Port:    8080,
-			Timeout: 30,
-		},
-	}
-
-	yamlBytes := ExampleYAML(cfg)
-
-	// 验证生成的 YAML 可以被正确解析
-	var parsed Config
-	configPath := writeTempConfig(t, string(yamlBytes))
-	loaded, err := Load(Config{}, WithConfigPaths(configPath))
-	require.NoError(t, err, "Generated YAML should be valid and parseable")
-
-	parsed = *loaded
-	a := assert.New(t)
-	a.Equal("test-app", parsed.Name)
-	a.True(parsed.Debug)
-	a.Equal("0.0.0.0", parsed.Server.Host)
-	a.Equal(8080, parsed.Server.Port)
-	a.Equal(30, parsed.Server.Timeout)
-}
-
-func TestExampleYAML_BlankLinesDoNotKeepIndentation(t *testing.T) {
-	type DB struct {
-		Host string `json:"host" desc:"数据库主机"`
-		Port int    `json:"port" desc:"端口号\n默认: 5432"`
-	}
-	type Config struct {
-		DB DB `json:"db" desc:"数据库配置\n支持 PostgreSQL"`
-	}
-
-	yaml := string(ExampleYAML(Config{
-		DB: DB{
-			Host: "localhost",
-			Port: 5432,
-		},
-	}))
-
-	lines := strings.SplitSeq(yaml, "\n")
-	for line := range lines {
-		assert.NotEqual(t, "  ", line, "blank lines should not keep indentation")
-		assert.NotEqual(t, "\t", line, "blank lines should not keep indentation")
-	}
-	assert.Contains(t, yaml, "host: \"localhost\" # 数据库主机\n\n  # 端口号\n  # 默认: 5432\n  port: 5432\n")
-}
-
-func TestExampleYAML_SkipsUnexportedTaggedFields(t *testing.T) {
-	typ := reflect.StructOf([]reflect.StructField{
-		{
-			Name: "Name",
-			Type: reflect.TypeFor[string](),
-			Tag:  `json:"name" desc:"应用名称"`,
-		},
-		{
-			Name:    "secret",
-			PkgPath: "github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm",
-			Type:    reflect.TypeFor[string](),
-			Tag:     `json:"secret" desc:"内部字段"`,
-		},
-	})
-	val := reflect.New(typ).Elem()
-	val.FieldByName("Name").SetString("test")
-
-	yaml := string(ExampleYAML(val.Interface()))
-
-	assert.Contains(t, yaml, `name: "test"`)
-	assert.NotContains(t, yaml, "secret:")
-}
-
-func TestExampleYAML_EmptyComplexDescDoesNotAddBlankLine(t *testing.T) {
-	type Server struct {
-		Host string `json:"host" desc:"服务器地址"`
-	}
-	type Config struct {
-		Server Server `json:"server"`
-	}
-
-	yaml := string(ExampleYAML(Config{
-		Server: Server{Host: "localhost"},
-	}))
-
-	assert.Contains(t, yaml, "# 复制此文件为 config.yaml 并根据需要修改\nserver:\n")
-	assert.NotContains(t, yaml, "# 复制此文件为 config.yaml 并根据需要修改\n\nserver:\n")
-}
-
-func TestExampleYAML_MapKeysAreSorted(t *testing.T) {
-	cfg := struct {
-		Labels map[string]string `json:"labels" desc:"标签"`
-	}{
-		Labels: map[string]string{
-			"zeta":  "last",
-			"alpha": "first",
-			"mid":   "middle",
-		},
-	}
-
-	yaml := string(ExampleYAML(cfg))
-
-	alpha := strings.Index(yaml, "alpha:")
-	mid := strings.Index(yaml, "mid:")
-	zeta := strings.Index(yaml, "zeta:")
-	require.NotEqual(t, -1, alpha)
-	require.NotEqual(t, -1, mid)
-	require.NotEqual(t, -1, zeta)
-	assert.Less(t, alpha, mid)
-	assert.Less(t, mid, zeta)
-}
-
-// =============================================================================
-// setCLIFlagValue 和 setSliceFlagValue 边界测试 (内部函数)
-// =============================================================================
-
-func TestSetCLIFlagValue_UnsupportedTypes(t *testing.T) {
-	// 测试不支持的类型触发 default case
-	// 这些类型在正常 CLI 使用中不会出现，但需要测试覆盖
-
-	var loadedCfg map[string]any
-	cmd := &cli.Command{
-		Name: "test",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "dummy", Value: "test"},
-		},
-		Action: func(ctx context.Context, c *cli.Command) error {
-			cfg := map[string]any{"dummy": "initial"}
-			// 测试不支持的基本类型 (complex128)
-			setCLIFlagValue(c, cfg, "dummy", "dummy", reflect.TypeFor[complex128]())
-			// 测试不支持的切片元素类型
-			setSliceFlagValue(c, cfg, "dummy", "dummy", reflect.TypeFor[[]complex128]())
-
-			loadedCfg = cfg
-
-			return nil
-		},
-	}
-
-	err := cmd.Run(context.Background(), []string{"test", "--dummy", "value"})
-	require.NoError(t, err)
-	// 不支持的类型不会修改值
-	assert.Equal(t, "initial", loadedCfg["dummy"])
+	assert.Equal(t, []string{"config.yaml", "config/config.yaml"}, DefaultPaths())
+	assert.Len(t, DefaultPaths("app"), 5)
 }

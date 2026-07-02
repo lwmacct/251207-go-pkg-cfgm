@@ -29,8 +29,8 @@ func TestRedisFlagsMapToConfigOnClientAndServerCommands(t *testing.T) {
 			cmd := &cli.Command{
 				Name:  tt.name,
 				Flags: Redis(defaults.Redis, usage),
-				Action: func(_ context.Context, cmd *cli.Command) error {
-					cfg, err := cfgm.LoadCmd(cmd, defaults, "", cfgm.WithConfigPaths("/nonexistent/config.yaml"))
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					cfg, err := cfgm.Load(ctx, defaults, cfgm.Command(cmd))
 					if err != nil {
 						return err
 					}

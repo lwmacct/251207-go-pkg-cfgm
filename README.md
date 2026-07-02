@@ -5,40 +5,32 @@
 [![Go CI](https://github.com/lwmacct/251207-go-pkg-cfgm/actions/workflows/go-ci.yml/badge.svg)](https://github.com/lwmacct/251207-go-pkg-cfgm/actions/workflows/go-ci.yml)
 [![codecov](https://codecov.io/gh/lwmacct/251207-go-pkg-cfgm/branch/main/graph/badge.svg)](https://codecov.io/gh/lwmacct/251207-go-pkg-cfgm)
 [![Go Report Card](https://goreportcard.com/badge/github.com/lwmacct/251207-go-pkg-cfgm)](https://goreportcard.com/report/github.com/lwmacct/251207-go-pkg-cfgm)
-[![GitHub Tag](https://img.shields.io/github/v/tag/lwmacct/251207-go-pkg-cfgm?sort=semver)](https://github.com/lwmacct/251207-go-pkg-cfgm/tags)
 
-通用的 Go 配置加载库，支持泛型，可被外部项目复用。
+通用 Go 配置加载库。配置结构体用 `json` tag 描述 key，加载来源由调用方显式声明。
 
 <!--TOC-->
 
 ## Table of Contents
 
-- [特性](#特性) `:31+12`
-- [安装](#安装) `:43+6`
-- [快速开始](#快速开始) `:49+289`
-  - [1. 定义配置结构体](#1-定义配置结构体) `:51+42`
-  - [2. 加载配置](#2-加载配置) `:93+124`
-  - [3. 环境变量](#3-环境变量) `:217+43`
-  - [4. 测试驱动的配置管理](#4-测试驱动的配置管理) `:260+78`
-- [模板语法](#模板语法) `:338+44`
-  - [基本语法](#基本语法) `:346+16`
-  - [语义说明](#语义说明) `:362+7`
-  - [使用示例](#使用示例) `:369+13`
-- [License](#license) `:382+3`
+- [特性](#特性) `:26+9`
+- [安装](#安装) `:35+6`
+- [快速开始](#快速开始) `:41+121`
+  - [定义配置](#定义配置) `:43+24`
+  - [加载配置](#加载配置) `:67+37`
+  - [CLI 集成](#cli-集成) `:104+58`
+- [辅助能力](#辅助能力) `:162+44`
+- [License](#license) `:206+3`
 
 <!--TOC-->
 
 ## 特性
 
-- **泛型支持**：适用于任意配置结构体
-- **显式来源管线**：默认值 → `File` → `Env` → `CLI`，source 顺序就是优先级
-- **加载报告**：返回每个 source 贡献的配置 key，便于排查配置来源
-- **严格校验**：默认拒绝配置文件中的未知 key，尽早发现拼写错误
-- **环境变量支持**：前缀匹配，适合 Docker/K8s 容器化部署
-- **自动映射**：CLI flag 名称自动从配置路径推导，递归移除命令链前缀并保留 `.` 层级
-- **示例生成**：自动根据结构体生成带注释的 YAML 配置示例
-- **模板展开**：支持环境变量引用、默认值与多级 fallback（Shell 参数展开）
-- **可注入日志**：支持传入自定义 `*slog.Logger` 接入应用日志体系
+- **显式来源**：默认值、文件、环境变量、CLI flags 都通过 options 声明。
+- **泛型加载**：`Load[T]` / `MustLoad[T]` 直接返回强类型配置。
+- **CLI profile**：`Command(cmd)` 封装 urfave/cli 常见约定。
+- **严格校验**：默认拒绝配置文件中的未知 key。
+- **加载报告**：`LoadReport` 返回每个来源贡献的 key。
+- **模板展开**：文件和默认值默认启用 `${...}` 展开，可显式关闭。
 
 ## 安装
 
@@ -48,17 +40,9 @@ go get github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm
 
 ## 快速开始
 
-### 1. 定义配置结构体
+### 定义配置
 
 ```go
-// internal/config/config.go
-package config
-
-import (
-    "time"
-    "github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm"
-)
-
 type Config struct {
     Server ServerConfig `json:"server" desc:"服务端配置"`
 }
@@ -76,99 +60,108 @@ func DefaultConfig() Config {
         },
     }
 }
+```
 
-func Load(ctx context.Context) (*Config, error) {
-    cfg, _, err := cfgm.New(DefaultConfig()).
-        Add(
-            cfgm.File("config/config.yaml", cfgm.Optional(), cfgm.ExpandTemplates()),
-            cfgm.Env("APP_"),
-        ).
-        Load(ctx)
-    return cfg, err
+YAML 和 JSON 都使用 `json` tag 作为配置 key。
+
+### 加载配置
+
+```go
+cfg, err := cfgm.Load(ctx,
+    DefaultConfig(),
+    cfgm.File("config/config.yaml", cfgm.Optional()),
+    cfgm.Env("APP_"),
+)
+```
+
+source 按声明顺序合并，后面的 source 覆盖前面的 source。只使用默认值时不传任何来源：
+
+```go
+cfg, err := cfgm.Load(ctx, DefaultConfig())
+```
+
+启动阶段可用 panic 版本：
+
+```go
+cfg := cfgm.MustLoad(ctx, DefaultConfig(),
+    cfgm.File("config/config.yaml", cfgm.Optional()),
+    cfgm.Env("APP_"),
+)
+```
+
+需要排查配置来源时使用 `LoadReport`：
+
+```go
+cfg, report, err := cfgm.LoadReport(ctx,
+    DefaultConfig(),
+    cfgm.Logger(logger),
+    cfgm.File("config/config.yaml", cfgm.Optional()),
+    cfgm.Env("APP_"),
+)
+_ = report.Sources
+```
+
+### CLI 集成
+
+高频 urfave/cli 调用：
+
+```go
+func action(ctx context.Context, cmd *cli.Command) error {
+    cfg := cfgm.MustLoad(ctx,
+        DefaultConfig(),
+        cfgm.Command(cmd),
+    )
+    return run(ctx, cfg)
 }
 ```
 
-说明：YAML/JSON 都以 `json` tag 作为配置 key。
+`Command(cmd)` 会按顺序加载：
 
-### 2. 加载配置
+1. 显式设置的 `--config / -c` 配置文件
+2. `--env-prefix / -e` 指定的环境变量前缀，或根命令名转换出的前缀
+3. 当前命令上显式设置的配置 flags
 
-```go
-logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-    Level: slog.LevelDebug,
-}))
-
-cfg, report, err := cfgm.New(DefaultConfig()).
-    WithLogger(logger).
-    Add(
-        // 默认 File 是 required；本地开发配置通常显式标记 Optional。
-        cfgm.File("config/config.yaml", cfgm.Optional(), cfgm.ExpandTemplates()),
-        cfgm.Env("APP_"),
-        cfgm.CLI(cmd, cfgm.IgnoreCLIFlags("dry-run", "format")),
-    ).
-    Load(context.Background())
-if err != nil {
-    return err
-}
-_ = report // report.Sources 记录每个 source 贡献的配置 key
-```
-
-source 按声明顺序合并，后面的 source 覆盖前面的 source。只想使用默认值时，不添加任何 source。
+模板展开默认开启。需要保留原始 `${...}` 字符串时：
 
 ```go
-cfg, report, err := cfgm.New(DefaultConfig()).Load(ctx)
+cfg, err := cfgm.Load(ctx,
+    DefaultConfig(),
+    cfgm.NoTemplateExpansion(),
+    cfgm.Command(cmd),
+)
 ```
 
-旧的 `Load` / `LoadCmd` / `With...` 入口仍作为过渡包装存在，但新的主路径是显式 source pipeline。
-
-CLI 场景可在根命令挂载 cfgm.ConfigFlag()，再把当前命令作为 `cfgm.CLI(cmd)` source：
+根命令可挂载约定 flags：
 
 ```go
 app := &cli.Command{
     Name:  "app",
-    Flags: []cli.Flag{cfgm.ConfigFlag()},
-    Commands: []*cli.Command{
-        {
-            Name: "server",
-            Action: func(ctx context.Context, cmd *cli.Command) error {
-                cfg, _, err := cfgm.New(DefaultConfig()).
-                    Add(
-                        cfgm.File(cmd.String("config"), cfgm.Optional(), cfgm.ExpandTemplates()),
-                        cfgm.Env("APP_"),
-                        cfgm.CLI(cmd),
-                    ).
-                    Load(ctx)
-                if err != nil {
-                    return err
-                }
-                _ = cfg
-                return nil
-            },
-        },
-    },
+    Flags: []cli.Flag{cfgm.ConfigFlag(), cfgm.EnvPrefixFlag()},
 }
 ```
 
-指定配置文件路径：
+命令可以包含不属于配置的业务 flags，用 `IgnoreFlags` 显式声明：
 
-```bash
-app --config ./config.yaml server
-app -c ./config.yaml server
+```go
+cfg, err := cfgm.Load(ctx,
+    DefaultConfig(),
+    cfgm.Command(cmd, cfgm.IgnoreFlags("dry-run", "format")),
+)
 ```
 
-`--config` 指定的路径会作为唯一配置文件搜索路径；未指定时使用 `WithAppName` / 默认路径规则。
+CLI flag 名称从配置路径推导，并按命令链递归剥离作用域：
 
-CLI flag 名称会从配置路径自动推导。cfgm 会根据当前 `cli.Command` 的命令链递归剥离匹配的配置前缀：
+| 命令链           | 配置 key              | 可声明的 flag   |
+| ---------------- | --------------------- | --------------- |
+| 无               | `server.addr`         | `--server.addr` |
+| `server`         | `server.addr`         | `--addr`        |
+| `server service` | `server.service.port` | `--port`        |
 
-| 命令链           | 配置 key                | 可声明的 flag      |
-| ---------------- | ----------------------- | ------------------ |
-| 无               | `server.addr`           | `--server.addr`    |
-| `server`         | `server.addr`           | `--addr`           |
-| `client`         | `client.server.hostkey` | `--server.hostkey` |
-| `server service` | `server.service.port`   | `--port`           |
+完整路径仍是 fallback 候选，例如 `server` 命令下仍可声明 `--redis.url`。
 
-完整配置路径仍是 fallback 候选，例如 `server` 命令下也可以声明 `--redis.url`。当 fallback 候选与命令链剥离后的候选重名时，剥离更深的候选优先；同一优先级仍然重复时会返回错误，避免静默写入错误字段。
+## 辅助能力
 
-CLI help 文案可以从配置字段的 `desc` tag 获取，与配置示例文件保持一致：
+使用 `Schema` 从配置字段的 `desc` tag 生成 CLI help 文案：
 
 ```go
 defaults := DefaultConfig()
@@ -181,100 +174,25 @@ flag := &cli.StringFlag{
 }
 ```
 
-`Schema(...).Command(...)` 使用同一套 flag 名称映射规则，所以 `client` 命令下的 `url` 会解析到 `client.url`，共享配置仍可使用完整路径，例如 `redis.url`。
-
-命令也可以包含不属于配置的业务 flags。默认情况下，cfgm 会严格校验每个非框架 flag 都能映射到配置字段，以便发现拼错的配置 flag；对于只控制本次操作的 flags，可显式忽略：
+测试中可校验命令是否覆盖指定配置前缀：
 
 ```go
-cfg, err := cfgm.LoadCmd(
-    cmd,
-    DefaultConfig(),
-    "app",
-    cfgm.WithIgnoredCLIFlags("host", "dry-run", "format"),
+cfgm.AssertCommandFlagCoverage(t, clientCommand, DefaultConfig(),
+    []string{"client", "redis"},
+    cfgm.IgnoreConfigKeys("redis.password"),
 )
 ```
 
-这类 flag 适合表达一次性操作参数，例如 `--host`、`--dry-run`、`--force`，不需要污染配置结构体。
-
-如果希望在测试中确保配置字段都有对应 CLI flag，可使用覆盖率校验：
+生成配置示例：
 
 ```go
-func TestClientCommandCoversConfigFlags(t *testing.T) {
-    cfgm.AssertCommandFlagCoverage(
-        t,
-        clientCommand,
-        DefaultConfig(),
-        []string{"client", "redis"},
-        cfgm.IgnoreConfigKeys("redis.password"),
-    )
-}
+yaml := cfgm.ExampleYAML(DefaultConfig())
+jsonBytes := cfgm.MarshalJSON(DefaultConfig())
 ```
 
-这适合防止新增配置字段后忘记补 CLI flag；敏感字段可通过 `IgnoreConfigKeys` 排除。
-
-注意：`IgnoreConfigKeys` 只用于覆盖率校验；运行时忽略非配置 CLI flag 请使用 `WithIgnoredCLIFlags`。
-
-### 3. 环境变量
-
-#### LoadCmd 自动使用命令名作为前缀
-
-`LoadCmd` 会自动将根命令名转换为大写并作为环境变量前缀：
-
-| 根命令名   | 环境变量前缀 |
-| ---------- | ------------ |
-| `app`      | `APP_`       |
-| `app-name` | `APP_NAME_`  |
-| `my-tool`  | `MY_TOOL_`   |
-
-使用 `WithEnvPrefix` 可覆盖默认行为：
+维护示例配置文件：
 
 ```go
-// 自定义前缀
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithEnvPrefix("CUSTOM_"),
-)
-
-// 禁用环境变量绑定
-cfg, err := cfgm.Load(DefaultConfig(),
-    cfgm.WithEnvPrefix(""),
-)
-```
-
-#### 环境变量命名规则
-
-| 环境变量                   | 配置 key               |
-| -------------------------- | ---------------------- |
-| `APP_SERVER_ADDR`          | `server.addr`          |
-| `APP_SERVER_TIMEOUT`       | `server.timeout`       |
-| `APP_DEBUG`                | `debug`                |
-| `APP_CLIENT_REV_AUTH_USER` | `client.rev-auth-user` |
-
-转换规则：
-
-1. 移除前缀（如 `APP_`）
-2. 点号 `.` 与连字符 `-` 转为下划线 `_`
-3. 转为大写
-
-通过反射自动生成配置 key 绑定，只匹配结构体中声明的 key（包括包含连字符的 key）。
-
-### 4. 测试驱动的配置管理
-
-本库提供 `ConfigFiles` 测试辅助工具，通过单元测试维护两类文件：
-
-- `config/config.example.yaml`：示例配置文件，由测试生成，适合提交到仓库
-- `config/config.yaml`：本地运行配置文件，由用户显式初始化或复制示例文件得到，通常不提交
-
-创建测试文件 `internal/config/config_test.go`：
-
-```go
-package config
-
-import (
-    "testing"
-    "github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm"
-)
-
-// 定义一次，复用多处
 var files = cfgm.ConfigFiles[Config]{
     Defaults:    DefaultConfig,
     ExampleFile: "config/config.example.yaml",
@@ -283,100 +201,6 @@ var files = cfgm.ConfigFiles[Config]{
 
 func TestWriteConfigExample(t *testing.T) { files.WriteExample(t) }
 func TestRuntimeConfigKeysValid(t *testing.T) { files.ValidateRuntimeConfig(t) }
-```
-
-路径为相对路径，相对于 `go.mod` 所在目录。
-
-#### 生成配置示例（TestWriteConfigExample）
-
-根据 `DefaultConfig()` 结构体自动生成带注释的示例文件，输出到 `ExampleFile`：
-
-```bash
-go test -v -run TestWriteConfigExample ./internal/config/...
-```
-
-生成的示例文件：
-
-```yaml
-# 默认配置示例文件, 此文件由单元测试生成, 请勿直接修改
-# 复制此文件为 config.yaml 并根据需要修改
-
-# 服务端配置
-server:
-  addr: ":8080" # 监听地址
-  timeout: 30s # 超时时间
-```
-
-**工作原理**：通过反射读取结构体的 `json` 和 `desc` tag，自动生成完整的 YAML 示例。
-
-#### 校验运行配置（TestRuntimeConfigKeysValid）
-
-验证 `RuntimeFile` 中的所有配置项都在 `ExampleFile` 中定义：
-
-```bash
-go test -v -run TestRuntimeConfigKeysValid ./internal/config/...
-```
-
-**用途**：
-
-- 防止配置项拼写错误（如 `servr.addr` 写成 `server.addr`）
-- 检测已废弃的配置项
-- CI 集成，确保配置文件与代码同步
-
-如果存在无效配置项，测试将失败并列出所有问题项。如果运行配置文件不存在，测试会自动跳过。
-
-#### 初始化本地运行配置
-
-`ConfigFiles.WriteExample` 只生成示例文件，不会写入或覆盖 `config/config.yaml`。如需生成本地运行配置，可在应用初始化命令中显式调用：
-
-```go
-err := cfgm.InitConfigFile(DefaultConfig(), "config/config.yaml")
-```
-
-如果目标文件已存在，`InitConfigFile` 会返回错误并拒绝覆盖。
-
-## 模板语法
-
-本库提供 `templexp` 包用于模板展开，采用 Shell 参数展开语法。
-
-```bash
-go get github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp
-```
-
-### 基本语法
-
-| 语法              | 说明                     | 示例                 |
-| ----------------- | ------------------------ | -------------------- |
-| `${VAR}`          | 参数展开                 | `${HOME}`            |
-| `${VAR:-default}` | fallback（未设置或空）   | `${PORT:-8080}`      |
-| `${VAR-default}`  | fallback（仅未设置）     | `${PORT-8080}`       |
-| `${VAR:+alt}`     | 替代值（已设置且非空）   | `${DEBUG:+1}`        |
-| `${VAR+alt}`      | 替代值（已设置即可）     | `${FLAG+1}`          |
-| `${VAR:?msg}`     | 必填（未设置或空时报错） | `${TOKEN:?required}` |
-| `${VAR?msg}`      | 必填（未设置时报错）     | `${TOKEN?required}`  |
-| `${VAR:=default}` | 赋值（未设置或空时赋值） | `${REGION:=cn}`      |
-| `${VAR=default}`  | 赋值（未设置时赋值）     | `${REGION=cn}`       |
-
-支持使用 `$$` 输出字面 `$`。
-
-### 语义说明
-
-- 仅识别 `${...}`，不解析 `$VAR` 形式
-- 支持嵌套展开：`${A:-${B:-default}}`
-- `:=` / `=` 赋值仅作用于当前展开过程，不会写回进程环境
-- 无法识别的 `${...}` 会原样保留
-
-### 使用示例
-
-```go
-import "github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
-
-// 展开模板
-result, err := templexp.ExpandTemplate(`{
-  "host": "${DB_HOST:-localhost}",
-  "port": "${DB_PORT:-5432}",
-  "key": "${PRIMARY_KEY:-${BACKUP_KEY:-sk-default}}"
-}`)
 ```
 
 ## License

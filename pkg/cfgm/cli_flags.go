@@ -198,7 +198,7 @@ func IgnoreConfigKeys(keys ...string) FlagCoverageOption {
 // ValidateCommandFlagCoverage 校验命令是否声明了指定配置前缀下的所有 CLI flags。
 //
 // prefixes 为配置前缀，如 "client"、"server"、"redis"。只校验这些前缀下的叶子配置项。
-// flag 名称使用与 [LoadCmd] 相同的映射规则：递归剥离命令链前缀，剥离越深优先级越高。
+// flag 名称使用与 [Command] 相同的映射规则：递归剥离命令链前缀，剥离越深优先级越高。
 func ValidateCommandFlagCoverage[T any](
 	cmd *cli.Command,
 	defaultConfig T,

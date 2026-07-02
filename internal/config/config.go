@@ -1,10 +1,6 @@
 // Package config 提供应用配置管理。
 //
-// 配置加载优先级 (从低到高)：
-//  1. 默认值 - DefaultConfig() 函数中定义
-//  2. 配置文件 - 通过 WithAppName / WithConfigPaths 选项设置
-//  3. 环境变量 - 默认使用 APP_ 前缀，可通过 WithEnvPrefix 覆盖或禁用
-//  4. CLI flags - 通过 WithCommand 选项设置
+// 配置加载由 cfgm.Load 的显式 options 决定；DefaultConfig 是最低优先级默认值。
 package config
 
 import (

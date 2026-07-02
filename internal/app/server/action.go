@@ -19,9 +19,7 @@ import (
 )
 
 func action(ctx context.Context, cmd *cli.Command) error {
-	// 加载配置：默认值 → 配置文件 → 环境变量 → CLI flags
-
-	cfg := cfgm.MustLoadCmd(cmd, config.DefaultConfig(), "")
+	cfg := cfgm.MustLoad(ctx, config.DefaultConfig(), cfgm.Command(cmd))
 
 	// 日志中记录配置信息（隐藏敏感信息）
 	slog.Info("Configuration loaded",

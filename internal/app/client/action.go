@@ -31,7 +31,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 }
 
 func healthAction(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := cfgm.LoadCmd(cmd, config.DefaultConfig(), "")
+	cfg, err := cfgm.Load(ctx, config.DefaultConfig(), cfgm.Command(cmd))
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func healthAction(ctx context.Context, cmd *cli.Command) error {
 }
 
 func getAction(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := cfgm.LoadCmd(cmd, config.DefaultConfig(), "")
+	cfg, err := cfgm.Load(ctx, config.DefaultConfig(), cfgm.Command(cmd))
 	if err != nil {
 		return err
 	}

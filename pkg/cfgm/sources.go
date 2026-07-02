@@ -20,13 +20,16 @@ type fileSource struct {
 }
 
 // File loads one required config file.
-func File(path string, opts ...FileOption) Source {
+func File(path string, opts ...FileOption) SourceOption {
 	return Files([]string{path}, opts...)
 }
 
 // Files loads the first existing file from paths.
-func Files(paths []string, opts ...FileOption) Source {
-	source := &fileSource{paths: append([]string{}, paths...)}
+func Files(paths []string, opts ...FileOption) SourceOption {
+	source := &fileSource{
+		paths:     append([]string{}, paths...),
+		templates: true,
+	}
 	for _, opt := range opts {
 		opt(source)
 	}
@@ -52,9 +55,19 @@ func Required() FileOption {
 }
 
 // ExpandTemplates expands ${...} templates before parsing the file.
+//
+// File template expansion is enabled by default; this option is mainly useful
+// after Raw when composing file options.
 func ExpandTemplates() FileOption {
 	return func(s *fileSource) {
 		s.templates = true
+	}
+}
+
+// Raw disables ${...} template expansion for this file source.
+func Raw() FileOption {
+	return func(s *fileSource) {
+		s.templates = false
 	}
 }
 
@@ -115,12 +128,20 @@ func (s *fileSource) Load(ctx context.Context, _ ConfigSchema) (map[string]any, 
 	return nil, fmt.Errorf("none of the config files exist: %s", strings.Join(s.paths, ", "))
 }
 
+func (s *fileSource) applyLoadOption(options *loadOptions) {
+	options.sources = append(options.sources, s)
+}
+
+func (s *fileSource) setTemplateExpansion(enabled bool) {
+	s.templates = enabled
+}
+
 type envSource struct {
 	prefix string
 }
 
 // Env loads environment variables for schema fields using the given prefix.
-func Env(prefix string) Source {
+func Env(prefix string) SourceOption {
 	return &envSource{prefix: prefix}
 }
 
@@ -148,6 +169,10 @@ func (s *envSource) Load(ctx context.Context, schema ConfigSchema) (map[string]a
 	return out, nil
 }
 
+func (s *envSource) applyLoadOption(options *loadOptions) {
+	options.sources = append(options.sources, s)
+}
+
 func envName(path string) string {
 	return strings.ToUpper(strings.NewReplacer(".", "_", "-", "_").Replace(path))
 }
@@ -158,7 +183,7 @@ type cliSource struct {
 }
 
 // CLI loads explicitly set urfave/cli flags.
-func CLI(cmd *cli.Command, opts ...CLISourceOption) Source {
+func CLI(cmd *cli.Command, opts ...CLISourceOption) SourceOption {
 	source := &cliSource{cmd: cmd}
 	for _, opt := range opts {
 		opt(source)
@@ -222,13 +247,8 @@ func (s *cliSource) Load(ctx context.Context, schema ConfigSchema) (map[string]a
 	return out, nil
 }
 
-func legacyCLI(cmd *cli.Command, ignored map[string]bool) Source {
-	ignoredNames := make([]string, 0, len(ignored))
-	for name := range ignored {
-		ignoredNames = append(ignoredNames, name)
-	}
-
-	return CLI(cmd, IgnoreCLIFlags(ignoredNames...))
+func (s *cliSource) applyLoadOption(options *loadOptions) {
+	options.sources = append(options.sources, s)
 }
 
 func isStringMapType(fieldType reflect.Type) bool {
