@@ -88,6 +88,9 @@ func (s ConfigSchema) hasPath(path string) bool {
 	if s.index == nil {
 		return false
 	}
+	if _, ok := s.index.nullableStructPaths[path]; ok {
+		return true
+	}
 	for _, field := range s.index.fields {
 		if path == field.configPath {
 			return true

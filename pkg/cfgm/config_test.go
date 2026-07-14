@@ -235,6 +235,96 @@ typo: true
 	assert.Equal(t, "app", cfg.Name)
 }
 
+func TestNullableStructCanOverrideDefaultWithNull(t *testing.T) {
+	type Provider struct {
+		Issuer string `json:"issuer"`
+	}
+	type Config struct {
+		Provider *Provider `json:"provider"`
+	}
+
+	configPath := writeTempConfig(t, "provider: null\n")
+	cfg, err := Load(context.Background(), Config{Provider: &Provider{Issuer: "https://default.example.com"}}, File(configPath))
+	require.NoError(t, err)
+	assert.Nil(t, cfg.Provider)
+}
+
+func TestNullableStructCanOverrideNilWithObject(t *testing.T) {
+	type Provider struct {
+		Issuer string `json:"issuer"`
+	}
+	type Config struct {
+		Provider *Provider `json:"provider"`
+	}
+
+	configPath := writeTempConfig(t, "provider:\n  issuer: https://auth.example.com\n")
+	cfg, err := Load(context.Background(), Config{}, File(configPath))
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Provider)
+	assert.Equal(t, "https://auth.example.com", cfg.Provider.Issuer)
+}
+
+func TestNullableStructAcceptsEmptyObject(t *testing.T) {
+	type Provider struct {
+		Issuer string `json:"issuer"`
+	}
+	type Config struct {
+		Provider *Provider `json:"provider"`
+	}
+
+	configPath := writeTempConfig(t, "provider: {}\n")
+	cfg, err := Load(context.Background(), Config{}, File(configPath))
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Provider)
+	assert.Empty(t, cfg.Provider.Issuer)
+}
+
+func TestNonPointerStructRejectsNull(t *testing.T) {
+	type Provider struct {
+		Issuer string `json:"issuer"`
+	}
+	type Config struct {
+		Provider Provider `json:"provider"`
+	}
+
+	configPath := writeTempConfig(t, "provider: null\n")
+	_, err := Load(context.Background(), Config{}, File(configPath))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown config keys")
+	assert.Contains(t, err.Error(), "provider")
+}
+
+func TestNullableStructStillRejectsUnknownSibling(t *testing.T) {
+	type Provider struct {
+		Issuer string `json:"issuer"`
+	}
+	type Config struct {
+		Provider *Provider `json:"provider"`
+	}
+
+	configPath := writeTempConfig(t, "provider: null\nprovider-typo: null\n")
+	_, err := Load(context.Background(), Config{}, File(configPath))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider-typo")
+}
+
+func TestExampleYAMLKeepsMapCommentOnMap(t *testing.T) {
+	type Provider struct {
+		Issuer string `json:"issuer"`
+	}
+	type Config struct {
+		Credentials map[string]string `json:"credentials" desc:"Credential map"`
+		Provider    *Provider         `json:"provider"    desc:"Optional provider"`
+	}
+
+	yaml := string(ExampleYAML(Config{
+		Credentials: map[string]string{"admin": "digest"},
+	}))
+	assert.Contains(t, yaml, "# Credential map\ncredentials:")
+	assert.Contains(t, yaml, "# Optional provider\nprovider: null")
+	assert.NotContains(t, yaml, "provider: null # Credential map")
+}
+
 func TestFileOptionalAndRequired(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`

@@ -24,15 +24,17 @@ type cliFlagCandidate struct {
 }
 
 type cliConfigIndex struct {
-	rootType reflect.Type
-	fields   []cliFieldMeta
+	rootType            reflect.Type
+	fields              []cliFieldMeta
+	nullableStructPaths map[string]struct{}
 }
 
 func newCLIConfigIndex(typ reflect.Type) *cliConfigIndex {
 	rootType := normalizeStructType(typ)
 	index := &cliConfigIndex{
-		rootType: rootType,
-		fields:   make([]cliFieldMeta, 0),
+		rootType:            rootType,
+		fields:              make([]cliFieldMeta, 0),
+		nullableStructPaths: make(map[string]struct{}),
 	}
 	index.collect(rootType, "")
 
@@ -53,6 +55,9 @@ func (i *cliConfigIndex) collect(typ reflect.Type, prefix string) {
 
 		fullPath := joinConfigPath(prefix, key)
 		if isStructType(field.Type) {
+			if field.Type.Kind() == reflect.Pointer {
+				i.nullableStructPaths[fullPath] = struct{}{}
+			}
 			i.collect(field.Type, fullPath)
 
 			continue

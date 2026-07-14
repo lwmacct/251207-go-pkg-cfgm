@@ -159,12 +159,13 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 		// 判断是否为复杂类型（结构体或数组）
 		isStruct := isStructType(field.Type)
 		isSlice := field.Type.Kind() == reflect.Slice
+		isMap := isMapType(field.Type)
 
 		switch {
 		case isStruct:
 			valNode = structToNode(fieldVal, field.Type)
 			setComplexFieldComment(keyNode, comment)
-		case isSlice:
+		case isSlice || isMap:
 			valNode = valueToNode(fieldVal, field.Type)
 			setComplexFieldComment(keyNode, comment)
 		default:
