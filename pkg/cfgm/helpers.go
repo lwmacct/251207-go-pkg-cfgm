@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-viper/mapstructure/v2"
 	yamlv3 "go.yaml.in/yaml/v3"
 )
 
@@ -40,6 +39,13 @@ func isStructType(typ reflect.Type) bool {
 	}
 
 	return typ.Kind() == reflect.Struct && typ != durationType && typ != timeType
+}
+
+func normalizeStructType(typ reflect.Type) reflect.Type {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	return typ
 }
 
 func isMapType(typ reflect.Type) bool {
@@ -210,52 +216,5 @@ func setByPath(dst map[string]any, path string, value any) {
 			current[part] = next
 		}
 		current = next
-	}
-}
-
-func decodeConfigMap(data map[string]any, out any) error {
-	conf := &mapstructure.DecoderConfig{
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.TextUnmarshallerHookFunc(),
-		),
-		Metadata:         nil,
-		Result:           out,
-		WeaklyTypedInput: true,
-		TagName:          "json",
-	}
-	decoder, err := mapstructure.NewDecoder(conf)
-	if err != nil {
-		return err
-	}
-
-	return decoder.Decode(data)
-}
-
-func flattenMapKeys(data map[string]any) []string {
-	var keys []string
-	flattenMapKeysRecursive(data, "", &keys)
-
-	return keys
-}
-
-func flattenMapKeysRecursive(data map[string]any, prefix string, keys *[]string) {
-	for key, value := range data {
-		fullKey := key
-		if prefix != "" {
-			fullKey = prefix + "." + key
-		}
-		if child, ok := value.(map[string]any); ok {
-			if len(child) == 0 {
-				*keys = append(*keys, fullKey)
-
-				continue
-			}
-			flattenMapKeysRecursive(child, fullKey, keys)
-
-			continue
-		}
-
-		*keys = append(*keys, fullKey)
 	}
 }

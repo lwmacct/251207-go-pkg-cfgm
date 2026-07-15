@@ -1,45 +1,47 @@
-// Package cfgm provides generic config loading for Go applications.
+// Package cfgm provides Schema-driven configuration for Go applications.
 //
-// Config structs use json tags as stable config keys. Load searches DefaultPaths
-// as an optional low-priority file source, then applies caller-declared sources
-// in order. Later sources override earlier ones.
+// A Definition owns defaults, validation, codecs, file and environment
+// loading, generated urfave/cli flags, and config examples:
 //
-// # Basic Loading
+//	definition := cfgm.New(DefaultConfig(), cfgm.AppName("app"))
+//	config, err := definition.Load(ctx, cfgm.Env("APP_"))
 //
-//	cfg, err := cfgm.Load(ctx,
-//	    DefaultConfig(),
-//	    cfgm.Env("APP_"),
-//	)
-//
-// Load validates source keys against the config schema by default. Use
-// AllowUnknownKeys when a source intentionally contains extra keys. Use
-// NoDefaultPaths to skip the automatic DefaultPaths file source. Template
-// expansion is enabled for defaults and built-in file sources by default; use
-// NoTemplateExpansion to keep raw ${...} strings.
+// Later sources replace earlier values. Definition.Load searches optional
+// DefaultPaths before caller-provided sources unless WithoutDefaultPaths is
+// set. Unknown keys are rejected by default.
 //
 // # CLI Integration
 //
-// For urfave/cli commands, Command applies cfgm's standard CLI profile:
-// app-specific DefaultPaths from the root command name, explicitly set --config
-// file, env prefix from --env-prefix or root command name, then explicitly set
-// CLI flags.
+// Definition.Flags returns the root --config/-c and --env-prefix/-e flags.
+// Bind selects config fields for one command and generates their typed flags:
 //
-//	func action(ctx context.Context, cmd *cli.Command) error {
-//	    cfg := cfgm.MustLoad(ctx,
-//	        DefaultConfig(),
-//	        cfgm.Command(cmd),
-//	    )
-//	    return run(ctx, cfg)
+//	binding := definition.Bind(
+//	    cfgm.Scope("server"),
+//	    cfgm.Include("redis"),
+//	    cfgm.Alias("server.addr", "a"),
+//	    cfgm.NoCLI("redis.password"),
+//	)
+//
+//	command := &cli.Command{
+//	    Name:  "server",
+//	    Flags: binding.Flags(),
+//	    Action: func(ctx context.Context, cmd *cli.Command) error {
+//	        config, err := binding.Load(ctx, cmd)
+//	        return run(ctx, config, err)
+//	    },
 //	}
 //
-// # Diagnostics
+// Binding.Load applies defaults, default paths, an explicit config file, the
+// selected environment prefix, and explicitly set CLI flags in that order.
 //
-// LoadReport returns the same config as Load plus a Report showing which keys
-// each source contributed.
+// # Composite Values
 //
-// # Generated Helpers
+// Environment slices and maps use complete JSON values. Scalar slices use
+// urfave's repeatable typed flags. Struct slices use repeatable strict JSON
+// objects; [] explicitly clears the collection and cannot be mixed with object
+// occurrences. A CLI collection replaces lower-priority sources as a whole.
 //
-// Schema derives field metadata for CLI usage text and coverage tests.
-// ExampleYAML, MarshalYAML, MarshalJSON, and ConfigFiles support generated
-// config examples and runtime config validation.
+// WithCodec registers parsing for custom leaf types across files, environment
+// variables, and CLI flags. ConfigFiles validates runtime files with the same
+// Definition Schema used by loading.
 package cfgm

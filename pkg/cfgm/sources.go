@@ -2,13 +2,13 @@ package cfgm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"strings"
-
-	"github.com/urfave/cli/v3"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
 )
@@ -16,19 +16,17 @@ import (
 type fileSource struct {
 	paths     []string
 	optional  bool
-	templates bool
+	templates *bool
 }
 
-// File loads one required config file.
-func File(path string, opts ...FileOption) SourceOption {
+func File(path string, opts ...FileOption) Source {
 	return Files([]string{path}, opts...)
 }
 
 // Files loads the first existing file from paths.
-func Files(paths []string, opts ...FileOption) SourceOption {
+func Files(paths []string, opts ...FileOption) Source {
 	source := &fileSource{
-		paths:     append([]string{}, paths...),
-		templates: true,
+		paths: append([]string{}, paths...),
 	}
 	for _, opt := range opts {
 		opt(source)
@@ -60,14 +58,16 @@ func Required() FileOption {
 // after Raw when composing file options.
 func ExpandTemplates() FileOption {
 	return func(s *fileSource) {
-		s.templates = true
+		enabled := true
+		s.templates = &enabled
 	}
 }
 
 // Raw disables ${...} template expansion for this file source.
 func Raw() FileOption {
 	return func(s *fileSource) {
-		s.templates = false
+		enabled := false
+		s.templates = &enabled
 	}
 }
 
@@ -79,7 +79,7 @@ func (s *fileSource) Name() string {
 	return "files"
 }
 
-func (s *fileSource) Load(ctx context.Context, _ ConfigSchema) (map[string]any, error) {
+func (s *fileSource) Load(ctx context.Context, schema Schema) (map[string]any, error) {
 	if len(s.paths) == 0 {
 		if s.optional {
 			return map[string]any{}, nil
@@ -98,14 +98,14 @@ func (s *fileSource) Load(ctx context.Context, _ ConfigSchema) (map[string]any, 
 			if os.IsNotExist(err) {
 				continue
 			}
-			if s.optional {
-				continue
-			}
-
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
 
-		if s.templates {
+		expandTemplates := schema.expandTemplates
+		if s.templates != nil {
+			expandTemplates = *s.templates
+		}
+		if expandTemplates {
 			expanded, expandErr := templexp.ExpandTemplate(string(content))
 			if expandErr != nil {
 				return nil, fmt.Errorf("expand template in %s: %w", path, expandErr)
@@ -128,20 +128,12 @@ func (s *fileSource) Load(ctx context.Context, _ ConfigSchema) (map[string]any, 
 	return nil, fmt.Errorf("none of the config files exist: %s", strings.Join(s.paths, ", "))
 }
 
-func (s *fileSource) applyLoadOption(options *loadOptions) {
-	options.sources = append(options.sources, s)
-}
-
-func (s *fileSource) setTemplateExpansion(enabled bool) {
-	s.templates = enabled
-}
-
 type envSource struct {
 	prefix string
 }
 
 // Env loads environment variables for schema fields using the given prefix.
-func Env(prefix string) SourceOption {
+func Env(prefix string) Source {
 	return &envSource{prefix: prefix}
 }
 
@@ -149,7 +141,7 @@ func (s *envSource) Name() string {
 	return "env:" + s.prefix
 }
 
-func (s *envSource) Load(ctx context.Context, schema ConfigSchema) (map[string]any, error) {
+func (s *envSource) Load(ctx context.Context, schema Schema) (map[string]any, error) {
 	if s.prefix == "" {
 		return map[string]any{}, nil
 	}
@@ -161,98 +153,58 @@ func (s *envSource) Load(ctx context.Context, schema ConfigSchema) (map[string]a
 		}
 
 		envKey := s.prefix + envName(field.Path)
-		if val := os.Getenv(envKey); val != "" {
-			setByPath(out, field.Path, val)
+		value, exists := os.LookupEnv(envKey)
+		if !exists {
+			continue
 		}
+		parsed, err := schema.parseEnvValue(field, value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", envKey, err)
+		}
+		setByPath(out, field.Path, parsed)
 	}
 
 	return out, nil
 }
 
-func (s *envSource) applyLoadOption(options *loadOptions) {
-	options.sources = append(options.sources, s)
+func (s Schema) parseEnvValue(field Field, raw string) (any, error) {
+	if _, ok := s.codecs[field.Type]; ok {
+		return raw, nil
+	}
+	typ := field.Type
+	if typ.Kind() != reflect.Slice && typ.Kind() != reflect.Map {
+		return raw, nil
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if err := decoder.Decode(&value); err != nil {
+		return nil, fmt.Errorf("parse %s as JSON %s: %w", field.Path, typ, err)
+	}
+	if err := ensureEnvJSONEOF(decoder); err != nil {
+		return nil, fmt.Errorf("parse %s as JSON %s: %w", field.Path, typ, err)
+	}
+	if typ.Kind() == reflect.Slice {
+		if _, ok := value.([]any); !ok {
+			return nil, fmt.Errorf("%s must be a JSON array", field.Path)
+		}
+	} else if _, ok := value.(map[string]any); !ok {
+		return nil, fmt.Errorf("%s must be a JSON object", field.Path)
+	}
+	return value, nil
+}
+
+func ensureEnvJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	err := decoder.Decode(&trailing)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return errors.New("must contain exactly one JSON value")
 }
 
 func envName(path string) string {
 	return strings.ToUpper(strings.NewReplacer(".", "_", "-", "_").Replace(path))
-}
-
-type cliSource struct {
-	cmd             *cli.Command
-	ignoredCLIFlags map[string]bool
-}
-
-// CLI loads explicitly set urfave/cli flags.
-func CLI(cmd *cli.Command, opts ...CLISourceOption) SourceOption {
-	source := &cliSource{cmd: cmd}
-	for _, opt := range opts {
-		opt(source)
-	}
-
-	return source
-}
-
-// CLISourceOption configures CLI sources.
-type CLISourceOption func(*cliSource)
-
-// IgnoreCLIFlags marks flags that do not map to config fields.
-func IgnoreCLIFlags(names ...string) CLISourceOption {
-	return func(s *cliSource) {
-		if s.ignoredCLIFlags == nil {
-			s.ignoredCLIFlags = make(map[string]bool, len(names))
-		}
-		for _, name := range names {
-			if name != "" {
-				s.ignoredCLIFlags[name] = true
-			}
-		}
-	}
-}
-
-func (s *cliSource) Name() string {
-	return "cli"
-}
-
-func (s *cliSource) Load(ctx context.Context, schema ConfigSchema) (map[string]any, error) {
-	if s.cmd == nil {
-		return map[string]any{}, nil
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if schema.index == nil {
-		return map[string]any{}, nil
-	}
-
-	fields, flagNames, err := schema.index.commandFields(s.cmd)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateCommandFlags(s.cmd, fields, s.ignoredCLIFlags); err != nil {
-		return nil, err
-	}
-
-	out := map[string]any{}
-	for _, flagName := range flagNames {
-		if !s.cmd.IsSet(flagName) {
-			continue
-		}
-
-		field := fields[flagName]
-		if !setCLIFlagValue(s.cmd, out, field.configPath, flagName, field.fieldType) {
-			return nil, fmt.Errorf("unsupported CLI flag type for --%s: %s", flagName, field.fieldType)
-		}
-	}
-
-	return out, nil
-}
-
-func (s *cliSource) applyLoadOption(options *loadOptions) {
-	options.sources = append(options.sources, s)
-}
-
-func isStringMapType(fieldType reflect.Type) bool {
-	return fieldType.Kind() == reflect.Map &&
-		fieldType.Key().Kind() == reflect.String &&
-		fieldType.Elem().Kind() == reflect.String
 }

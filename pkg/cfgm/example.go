@@ -330,12 +330,12 @@ type mapNodeEntry struct {
 	value reflect.Value
 }
 
-// ConfigFiles 声明一组由默认配置驱动的配置文件。
+// ConfigFiles 声明一组由配置定义驱动的配置文件。
 //
 // 使用示例：
 //
 //	var files = cfgm.ConfigFiles[Config]{
-//	    Defaults:    DefaultConfig,
+//	    Definition:  cfgm.New(DefaultConfig()),
 //	    ExampleFile: "config/config.example.yaml",
 //	    RuntimeFile: "config/config.yaml",
 //	}
@@ -343,17 +343,17 @@ type mapNodeEntry struct {
 //	func TestWriteConfigExample(t *testing.T) { files.WriteExample(t) }
 //	func TestRuntimeConfigKeysValid(t *testing.T) { files.ValidateRuntimeConfig(t) }
 type ConfigFiles[T any] struct {
-	Defaults    func() T // 默认配置来源
-	ExampleFile string   // 示例文件相对路径（相对于 go.mod 所在目录）
-	RuntimeFile string   // 运行配置文件相对路径（相对于 go.mod 所在目录）
+	Definition  *Definition[T] // 配置定义
+	ExampleFile string         // 示例文件相对路径（相对于 go.mod 所在目录）
+	RuntimeFile string         // 运行配置文件相对路径（相对于 go.mod 所在目录）
 }
 
 // WriteExample 将示例配置写入 ExampleFile。
 func (f ConfigFiles[T]) WriteExample(t *testing.T) {
 	t.Helper()
 
-	if f.Defaults == nil {
-		t.Fatal("Defaults is nil")
+	if f.Definition == nil {
+		t.Fatal("Definition is nil")
 	}
 
 	outputPath, err := resolveProjectPath(f.ExampleFile, 1)
@@ -361,7 +361,7 @@ func (f ConfigFiles[T]) WriteExample(t *testing.T) {
 		t.Fatalf("无法找到项目根目录: %v", err)
 	}
 
-	yamlBytes := ExampleYAML(f.Defaults())
+	yamlBytes := ExampleYAML(f.Definition.defaults)
 
 	outputDir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(outputDir, 0750); err != nil {
@@ -375,51 +375,25 @@ func (f ConfigFiles[T]) WriteExample(t *testing.T) {
 	t.Logf("✅ 已生成配置示例文件: %s", outputPath)
 }
 
-// ValidateRuntimeConfig 校验 RuntimeFile 中的键名是否都在 ExampleFile 中定义。
+// ValidateRuntimeConfig 使用同一配置定义校验 RuntimeFile。
 func (f ConfigFiles[T]) ValidateRuntimeConfig(t *testing.T) {
 	t.Helper()
+	if f.Definition == nil {
+		t.Fatal("Definition is nil")
+	}
 
 	configPath, err := resolveProjectPath(f.RuntimeFile, 1)
 	if err != nil {
 		t.Fatalf("无法找到项目根目录: %v", err)
 	}
-	examplePath, err := resolveProjectPath(f.ExampleFile, 1)
-	if err != nil {
-		t.Fatalf("无法找到项目根目录: %v", err)
-	}
-
 	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
 		t.Skipf("%s 不存在，跳过验证", f.RuntimeFile)
 	}
 
-	exampleKeys, err := loadConfigKeys(examplePath)
-	if err != nil {
-		t.Fatalf("无法加载 %s: %v", f.ExampleFile, err)
-	}
-
-	configKeys, err := loadConfigKeys(configPath)
-	if err != nil {
-		t.Fatalf("无法加载 %s: %v", f.RuntimeFile, err)
-	}
-
-	validKeyMap := make(map[string]bool, len(exampleKeys))
-	for _, key := range exampleKeys {
-		validKeyMap[key] = true
-	}
-
-	var invalidKeys []string
-	for _, key := range configKeys {
-		if !validKeyMap[key] {
-			invalidKeys = append(invalidKeys, key)
-		}
-	}
-
-	if len(invalidKeys) > 0 {
-		t.Fatalf(
-			"%s 包含以下无效配置项:\n  - %s",
-			f.RuntimeFile,
-			strings.Join(invalidKeys, "\n  - "),
-		)
+	loader := f.Definition.loader()
+	loader.sources = []Source{File(configPath)}
+	if _, _, err := loader.load(t.Context()); err != nil {
+		t.Fatalf("%s 配置无效: %v", f.RuntimeFile, err)
 	}
 
 	t.Logf("✅ 配置文件 %s 的所有配置项都有效", f.RuntimeFile)
@@ -445,19 +419,4 @@ func FindProjectRoot(skip int) (string, error) {
 		}
 		dir = parent
 	}
-}
-
-// loadConfigKeys 加载配置文件并返回所有配置键（支持 YAML 和 JSON）。
-func loadConfigKeys(path string) ([]string, error) {
-	content, err := os.ReadFile(path) //nolint:gosec // path is provided by test helpers/config paths
-	if err != nil {
-		return nil, fmt.Errorf("加载文件失败: %w", err)
-	}
-
-	configMap, err := parseConfigBytes(path, content)
-	if err != nil {
-		return nil, fmt.Errorf("解析文件失败: %w", err)
-	}
-
-	return flattenMapKeys(configMap), nil
 }
