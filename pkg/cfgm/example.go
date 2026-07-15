@@ -137,17 +137,11 @@ func structToNode(val reflect.Value, typ reflect.Type) *yamlv3.Node {
 
 	node := &yamlv3.Node{Kind: yamlv3.MappingNode}
 
-	for field := range typ.Fields() {
-		if field.PkgPath != "" {
-			continue
-		}
-
-		fieldVal := val.FieldByIndex(field.Index)
-
+	fields, _ := configFields(typ)
+	for _, configured := range fields {
+		field := configured.field
+		fieldVal := val.FieldByIndex(configured.index)
 		key := configTagName(field)
-		if key == "" {
-			continue
-		}
 		comment := field.Tag.Get("desc")
 
 		// Key node

@@ -21,6 +21,59 @@ func configTagName(field reflect.StructField) string {
 	return parseTagName(field.Tag.Get("json"))
 }
 
+type configField struct {
+	field reflect.StructField
+	index []int
+}
+
+func configFields(typ reflect.Type) ([]configField, []reflect.Type) {
+	var fields []configField
+	var inlinedTypes []reflect.Type
+	var collect func(reflect.Type, []int)
+	collect = func(current reflect.Type, parentIndex []int) {
+		for field := range current.Fields() {
+			if field.PkgPath != "" {
+				continue
+			}
+			key, inline := configFieldTag(field)
+			index := append(append([]int(nil), parentIndex...), field.Index...)
+			if inline {
+				inlinedTypes = append(inlinedTypes, field.Type)
+				collect(field.Type, index)
+				continue
+			}
+			if key == "" {
+				continue
+			}
+			fields = append(fields, configField{field: field, index: index})
+		}
+	}
+	collect(typ, nil)
+	return fields, inlinedTypes
+}
+
+func configFieldTag(field reflect.StructField) (string, bool) {
+	key := configTagName(field)
+	tag := field.Tag.Get("cfgm")
+	if tag == "" {
+		return key, false
+	}
+	parts := strings.Split(tag, ",")
+	if len(parts) != 2 || parts[0] != "" || parts[1] != "inline" {
+		panic(fmt.Errorf("cfgm: config field %s has invalid cfgm tag %q", field.Name, tag))
+	}
+	if key != "" {
+		panic(fmt.Errorf("cfgm: inline config field %s must not have a name", field.Name))
+	}
+	if field.Tag.Get("json") != "" {
+		panic(fmt.Errorf("cfgm: inline config field %s must not have a json tag", field.Name))
+	}
+	if !field.Anonymous || field.Type.Kind() != reflect.Struct || field.Type == durationType || field.Type == timeType {
+		panic(fmt.Errorf("cfgm: inline config field %s must be an anonymous non-pointer struct", field.Name))
+	}
+	return "", true
+}
+
 func parseTagName(tag string) string {
 	if tag == "" {
 		return ""
@@ -74,17 +127,11 @@ func structValueToMap(val reflect.Value, typ reflect.Type) map[string]any {
 	}
 
 	out := make(map[string]any)
-	for field := range typ.Fields() {
-		if field.PkgPath != "" {
-			continue
-		}
-
+	fields, _ := configFields(typ)
+	for _, configured := range fields {
+		field := configured.field
 		key := configTagName(field)
-		if key == "" {
-			continue
-		}
-
-		fieldVal := val.FieldByIndex(field.Index)
+		fieldVal := val.FieldByIndex(configured.index)
 		out[key] = valueToAny(fieldVal, field.Type)
 	}
 

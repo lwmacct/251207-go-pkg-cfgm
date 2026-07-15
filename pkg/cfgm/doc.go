@@ -33,6 +33,9 @@
 // Config.Server to the server command, so server.addr becomes --addr.
 // Manager.Action applies defaults, default paths, an explicit config file, the
 // selected environment prefix, and explicitly set CLI flags in that order.
+// Anonymous non-pointer structs tagged with cfgm:",inline" contribute their
+// fields at the containing config path across every source and generated
+// output. Inline types cannot use codecs, and duplicate paths are rejected.
 //
 // # Composite Values
 //

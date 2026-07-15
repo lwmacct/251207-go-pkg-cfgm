@@ -53,6 +53,19 @@ var Manager = cfgm.New(
 
 配置根类型必须是非指针 struct。`json` tag 是文件、环境变量和 CLI 的稳定 key，`desc` tag 用作 CLI help 和示例配置注释。
 
+### 组合配置
+
+使用 `cfgm:",inline"` 将公共配置类型的字段展开到当前配置层级：
+
+```go
+type TLSConfig struct {
+    tlsreload.Config `cfgm:",inline"`
+    Enabled bool `json:"enabled" desc:"是否启用 TLS"`
+}
+```
+
+嵌入类型字段的文件、环境变量和 CLI 路径不会增加中间层级。`inline` 必须用于匿名的非指针 struct，该字段不能再声明 `json` tag，也不能为嵌入类型注册 codec；展开后的重复配置 key 会在 `cfgm.New` 时被拒绝。
+
 ## 非 CLI 加载
 
 ```go

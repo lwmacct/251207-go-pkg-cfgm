@@ -795,17 +795,12 @@ func (m *schemaModel) collect(typ reflect.Type, prefix string, parentIndex []int
 	typ = normalizeStructType(typ)
 	m.enterType(typ)
 	defer m.leaveType(typ)
-	for field := range typ.Fields() {
-		if field.PkgPath != "" {
-			continue
-		}
+	for _, configured := range m.configFields(typ) {
+		field := configured.field
 		key := configTagName(field)
-		if key == "" {
-			continue
-		}
 		m.validateNewPath(prefix, key)
 		path := joinSchemaPath(prefix, key)
-		index := append(append([]int(nil), parentIndex...), field.Index...)
+		index := append(append([]int(nil), parentIndex...), configured.index...)
 		m.paths[path] = field.Type
 		_, hasCodec := m.codecs[field.Type]
 		if isStructType(field.Type) && !hasCodec {
@@ -851,19 +846,24 @@ func (m *schemaModel) collectCompositePaths(typ reflect.Type, prefix string) {
 	}
 	m.enterType(typ)
 	defer m.leaveType(typ)
-	for field := range typ.Fields() {
-		if field.PkgPath != "" {
-			continue
-		}
+	for _, configured := range m.configFields(typ) {
+		field := configured.field
 		key := configTagName(field)
-		if key == "" {
-			continue
-		}
 		m.validateNewPath(prefix, key)
 		path := joinSchemaPath(prefix, key)
 		m.paths[path] = field.Type
 		m.collectCompositePaths(field.Type, path)
 	}
+}
+
+func (m *schemaModel) configFields(typ reflect.Type) []configField {
+	fields, inlinedTypes := configFields(typ)
+	for _, inlinedType := range inlinedTypes {
+		if _, hasCodec := m.codecs[inlinedType]; hasCodec {
+			panic(fmt.Errorf("cfgm: inline config type %s cannot use a codec", inlinedType))
+		}
+	}
+	return fields
 }
 
 func (m *schemaModel) enterType(typ reflect.Type) {
@@ -937,13 +937,11 @@ func validateConfigValue(
 		if !ok {
 			return fmt.Errorf("config key %q must be an object", path)
 		}
-		fields := make(map[string]reflect.Type, typ.NumField())
-		for field := range typ.Fields() {
-			if field.PkgPath == "" {
-				if key := configTagName(field); key != "" {
-					fields[key] = field.Type
-				}
-			}
+		configuredFields, _ := configFields(typ)
+		fields := make(map[string]reflect.Type, len(configuredFields))
+		for _, configured := range configuredFields {
+			field := configured.field
+			fields[configTagName(field)] = field.Type
 		}
 		for key, child := range object {
 			childPath := joinSchemaPath(path, key)
@@ -1143,7 +1141,8 @@ func decodeConfigMapWithCodecs(data map[string]any, out any, codecs map[reflect.
 		DecodeHook:       mapstructure.ComposeDecodeHookFunc(hooks...),
 		Result:           out,
 		WeaklyTypedInput: true,
-		TagName:          "json",
+		TagName:          "cfgm,json",
+		SquashTagOption:  "inline",
 	})
 	if err != nil {
 		return err
