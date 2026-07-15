@@ -330,12 +330,12 @@ type mapNodeEntry struct {
 	value reflect.Value
 }
 
-// ConfigFiles 声明一组由配置定义驱动的配置文件。
+// ConfigFiles 声明一组由配置管理器驱动的配置文件。
 //
 // 使用示例：
 //
 //	var files = cfgm.ConfigFiles[Config]{
-//	    Definition:  cfgm.New(DefaultConfig()),
+//	    Manager:     cfgm.New(DefaultConfig()),
 //	    ExampleFile: "config/config.example.yaml",
 //	    RuntimeFile: "config/config.yaml",
 //	}
@@ -343,17 +343,17 @@ type mapNodeEntry struct {
 //	func TestWriteConfigExample(t *testing.T) { files.WriteExample(t) }
 //	func TestRuntimeConfigKeysValid(t *testing.T) { files.ValidateRuntimeConfig(t) }
 type ConfigFiles[T any] struct {
-	Definition  *Definition[T] // 配置定义
-	ExampleFile string         // 示例文件相对路径（相对于 go.mod 所在目录）
-	RuntimeFile string         // 运行配置文件相对路径（相对于 go.mod 所在目录）
+	Manager     *Manager[T] // 配置管理器
+	ExampleFile string      // 示例文件相对路径（相对于 go.mod 所在目录）
+	RuntimeFile string      // 运行配置文件相对路径（相对于 go.mod 所在目录）
 }
 
 // WriteExample 将示例配置写入 ExampleFile。
 func (f ConfigFiles[T]) WriteExample(t *testing.T) {
 	t.Helper()
 
-	if f.Definition == nil {
-		t.Fatal("Definition is nil")
+	if f.Manager == nil {
+		t.Fatal("Manager is nil")
 	}
 
 	outputPath, err := resolveProjectPath(f.ExampleFile, 1)
@@ -361,7 +361,7 @@ func (f ConfigFiles[T]) WriteExample(t *testing.T) {
 		t.Fatalf("无法找到项目根目录: %v", err)
 	}
 
-	yamlBytes := ExampleYAML(f.Definition.defaults)
+	yamlBytes := ExampleYAML(f.Manager.defaults)
 
 	outputDir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(outputDir, 0750); err != nil {
@@ -378,8 +378,8 @@ func (f ConfigFiles[T]) WriteExample(t *testing.T) {
 // ValidateRuntimeConfig 使用同一配置定义校验 RuntimeFile。
 func (f ConfigFiles[T]) ValidateRuntimeConfig(t *testing.T) {
 	t.Helper()
-	if f.Definition == nil {
-		t.Fatal("Definition is nil")
+	if f.Manager == nil {
+		t.Fatal("Manager is nil")
 	}
 
 	configPath, err := resolveProjectPath(f.RuntimeFile, 1)
@@ -390,7 +390,7 @@ func (f ConfigFiles[T]) ValidateRuntimeConfig(t *testing.T) {
 		t.Skipf("%s 不存在，跳过验证", f.RuntimeFile)
 	}
 
-	loader := f.Definition.loader()
+	loader := f.Manager.loader()
 	loader.sources = []Source{File(configPath)}
 	if _, _, err := loader.load(t.Context()); err != nil {
 		t.Fatalf("%s 配置无效: %v", f.RuntimeFile, err)

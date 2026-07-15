@@ -1,6 +1,7 @@
 package cfgm
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -9,12 +10,46 @@ import (
 const configFlagName = "config"
 const envPrefixFlagName = "env-prefix"
 
-// RootFlags returns cfgm's conventional root command flags.
-func RootFlags() []cli.Flag {
+func rootFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{Name: configFlagName, Aliases: []string{"c"}, Usage: "配置文件路径"},
 		&cli.StringFlag{Name: envPrefixFlagName, Aliases: []string{"e"}, Usage: "环境变量前缀"},
 	}
+}
+
+func mergeCLIFlags(existing, additions []cli.Flag) ([]cli.Flag, error) {
+	seen := make(map[string]string)
+	for _, flag := range existing {
+		if flag == nil {
+			continue
+		}
+		primary := ""
+		if names := flag.Names(); len(names) > 0 {
+			primary = names[0]
+		}
+		for _, name := range flag.Names() {
+			if previous, exists := seen[name]; exists {
+				return nil, fmt.Errorf("CLI flag --%s is ambiguous: matches --%s and --%s", name, previous, primary)
+			}
+			seen[name] = primary
+		}
+	}
+	for _, flag := range additions {
+		if flag == nil {
+			continue
+		}
+		primary := ""
+		if names := flag.Names(); len(names) > 0 {
+			primary = names[0]
+		}
+		for _, name := range flag.Names() {
+			if previous, exists := seen[name]; exists {
+				return nil, fmt.Errorf("CLI flag --%s is ambiguous: matches --%s and --%s", name, previous, primary)
+			}
+			seen[name] = primary
+		}
+	}
+	return append(append([]cli.Flag(nil), existing...), additions...), nil
 }
 
 func commandConfigPath(cmd *cli.Command) string {

@@ -24,24 +24,18 @@ type config struct {
 }
 
 func main() {
-	definition := cfgm.New(config{}, cfgm.AppName("composite"), cfgm.WithoutDefaultPaths())
-	binding := definition.Bind(cfgm.Command("server"))
+	manager := cfgm.New(config{}, cfgm.AppName("composite"), cfgm.WithoutDefaultPaths())
 	app := &cli.Command{
-		Name:  "composite",
-		Flags: cfgm.RootFlags(),
+		Name: "composite",
 		Commands: []*cli.Command{{
-			Name:  "server",
-			Flags: binding.Flags(),
-			Action: func(ctx context.Context, cmd *cli.Command) error {
-				loaded, err := binding.Load(ctx, cmd)
-				if err != nil {
-					return err
-				}
+			Name: "server",
+			Action: manager.Action(func(_ context.Context, _ *cli.Command, loaded *config) error {
 				_, _ = fmt.Fprintf(os.Stdout, "%s", cfgm.MarshalYAML(loaded))
 				return nil
-			},
+			}),
 		}},
 	}
+	manager.MustConfigure(app)
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)

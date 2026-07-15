@@ -58,21 +58,24 @@ func bindingDefaults() bindingTestConfig {
 	return cfg
 }
 
-func TestBindingGeneratesTypedFlags(t *testing.T) {
-	definition := New(bindingDefaults(), AppName("testapp"))
-	binding := definition.Bind(
-		Command("server"),
-		Alias("addr", "a"),
-		NoCLI("redis.password"),
+func TestManagerGeneratesTypedFlags(t *testing.T) {
+	manager := New(
+		bindingDefaults(),
+		AppName("testapp"),
+		CLIAlias("server.addr", "a"),
+		HideCLI("server.redis.password"),
 	)
+	server := &cli.Command{Name: "server", Action: manager.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil })}
+	root := &cli.Command{Name: "app", Commands: []*cli.Command{server}}
+	manager.MustConfigure(root)
 
-	rootFlags := RootFlags()
-	configFlag := requireFlagType[*cli.StringFlag](t, rootFlags, "config")
+	configFlag := requireFlagType[*cli.StringFlag](t, root.Flags, "config")
 	assert.Equal(t, []string{"c"}, configFlag.Aliases)
-	envPrefixFlag := requireFlagType[*cli.StringFlag](t, rootFlags, "env-prefix")
+	envPrefixFlag := requireFlagType[*cli.StringFlag](t, root.Flags, "env-prefix")
 	assert.Equal(t, []string{"e"}, envPrefixFlag.Aliases)
+	assert.Nil(t, findFlag(root.Flags, "server.addr"))
 
-	flags := binding.Flags()
+	flags := server.Flags
 	addr := requireFlagType[*cli.StringFlag](t, flags, "addr")
 	assert.Contains(t, addr.Aliases, "a")
 	requireFlagType[*cli.BoolFlag](t, flags, "debug")
@@ -83,28 +86,26 @@ func TestBindingGeneratesTypedFlags(t *testing.T) {
 	assert.Nil(t, findFlag(flags, "redis.password"))
 }
 
-func TestBindingTrimsNestedCommandPath(t *testing.T) {
-	definition := New(bindingDefaults(), WithoutDefaultPaths())
-	binding := definition.Bind(Command("server", "redis"), NoCLI("password"))
-	requireFlagType[*cli.StringFlag](t, binding.Flags(), "url")
-	assert.Nil(t, findFlag(binding.Flags(), "password"))
-
+func TestManagerTrimsNestedCommandPath(t *testing.T) {
+	manager := New(bindingDefaults(), WithoutDefaultPaths(), HideCLI("server.redis.password"))
 	var loaded *bindingTestConfig
+	redis := &cli.Command{
+		Name: "redis",
+		Action: manager.Action(func(_ context.Context, _ *cli.Command, cfg *bindingTestConfig) error {
+			loaded = cfg
+			return nil
+		}),
+	}
 	root := &cli.Command{
 		Name: "app",
 		Commands: []*cli.Command{{
-			Name: "server",
-			Commands: []*cli.Command{{
-				Name:  "redis",
-				Flags: binding.Flags(),
-				Action: func(ctx context.Context, cmd *cli.Command) error {
-					var err error
-					loaded, err = binding.Load(ctx, cmd)
-					return err
-				},
-			}},
+			Name:     "server",
+			Commands: []*cli.Command{redis},
 		}},
 	}
+	manager.MustConfigure(root)
+	requireFlagType[*cli.StringFlag](t, redis.Flags, "url")
+	assert.Nil(t, findFlag(redis.Flags, "password"))
 
 	err := root.Run(t.Context(), []string{"app", "server", "redis", "--url=redis://nested:6379"})
 	require.NoError(t, err)
@@ -112,24 +113,15 @@ func TestBindingTrimsNestedCommandPath(t *testing.T) {
 	assert.Equal(t, "redis://nested:6379", loaded.Server.Redis.URL)
 }
 
-func TestBindingRejectsMismatchedCommandLineage(t *testing.T) {
-	definition := New(bindingDefaults(), WithoutDefaultPaths())
-	binding := definition.Bind(Command("server"))
-	cmd := &cli.Command{
-		Name:  "app",
-		Flags: binding.Flags(),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			_, err := binding.Load(ctx, cmd)
-			return err
-		},
-	}
+func TestManagerActionRequiresConfiguration(t *testing.T) {
+	manager := New(bindingDefaults(), WithoutDefaultPaths())
+	cmd := &cli.Command{Name: "app", Action: manager.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil })}
 	err := cmd.Run(t.Context(), []string{"app"})
-	require.ErrorContains(t, err, `binding command path "server" does not match CLI command path ""`)
+	require.ErrorContains(t, err, "must be configured")
 }
 
-func TestBindingLoadsSourcesInPriorityOrder(t *testing.T) {
-	definition := New(bindingDefaults(), AppName("testapp"))
-	binding := definition.Bind(Command("server"), NoCLI("redis.password"))
+func TestManagerLoadsSourcesInPriorityOrder(t *testing.T) {
+	manager := New(bindingDefaults(), AppName("testapp"), HideCLI("server.redis.password"))
 	configPath := writeTempConfig(t, `
 server:
   addr: ":8000"
@@ -141,19 +133,18 @@ server:
 	t.Setenv("TESTAPP_SERVER_REDIS_URL", "redis://env:6379")
 
 	var loaded *bindingTestConfig
-	root := &cli.Command{
-		Name:  "testapp",
-		Flags: RootFlags(),
-		Commands: []*cli.Command{{
-			Name:  "server",
-			Flags: binding.Flags(),
-			Action: func(ctx context.Context, cmd *cli.Command) error {
-				var err error
-				loaded, err = binding.Load(ctx, cmd)
-				return err
-			},
-		}},
+	server := &cli.Command{
+		Name: "server",
+		Action: manager.Action(func(_ context.Context, _ *cli.Command, cfg *bindingTestConfig) error {
+			loaded = cfg
+			return nil
+		}),
 	}
+	root := &cli.Command{
+		Name:     "testapp",
+		Commands: []*cli.Command{server},
+	}
+	manager.MustConfigure(root)
 
 	err := root.Run(t.Context(), []string{
 		"testapp", "--config", configPath, "server",
@@ -167,10 +158,9 @@ server:
 	assert.Equal(t, "redis://env:6379", loaded.Server.Redis.URL)
 }
 
-func TestBindingLoadsRepeatedStructValues(t *testing.T) {
-	definition := New(bindingDefaults())
-	binding := definition.Bind(Command("server"))
-	loaded, err := runBinding(t, binding,
+func TestManagerLoadsRepeatedStructValues(t *testing.T) {
+	manager := New(bindingDefaults())
+	loaded, err := runManager(t, manager,
 		`--certificates={"id":"main","certificate":"op://cert/main","private-key":"op://key/main","refresh":"30s"}`,
 		`--certificates={"id":"api","certificate":"op://cert/api","private-key":"op://key/api","refresh":"1m"}`,
 	)
@@ -182,10 +172,9 @@ func TestBindingLoadsRepeatedStructValues(t *testing.T) {
 	assert.Equal(t, time.Minute, loaded.Server.Certificates[1].Refresh)
 }
 
-func TestBindingStructValuesReplaceLowerPrioritySources(t *testing.T) {
-	definition := New(bindingDefaults())
-	binding := definition.Bind(Command("server"))
-	loaded, err := runBinding(t, binding,
+func TestManagerStructValuesReplaceLowerPrioritySources(t *testing.T) {
+	manager := New(bindingDefaults())
+	loaded, err := runManager(t, manager,
 		`--certificates={"id":"only","certificate":"file:///only.crt","private-key":"file:///only.key"}`,
 	)
 	require.NoError(t, err)
@@ -193,25 +182,22 @@ func TestBindingStructValuesReplaceLowerPrioritySources(t *testing.T) {
 	assert.Equal(t, "only", loaded.Server.Certificates[0].ID)
 }
 
-func TestBindingStructValuesCanBeCleared(t *testing.T) {
-	definition := New(bindingDefaults())
-	binding := definition.Bind(Command("server"))
-	loaded, err := runBinding(t, binding, `--certificates=[]`)
+func TestManagerStructValuesCanBeCleared(t *testing.T) {
+	manager := New(bindingDefaults())
+	loaded, err := runManager(t, manager, `--certificates=[]`)
 	require.NoError(t, err)
 	assert.Empty(t, loaded.Server.Certificates)
 }
 
-func TestBindingScalarCollectionsReplaceDefaults(t *testing.T) {
-	definition := New(bindingDefaults())
-	binding := definition.Bind(Command("server"))
-	loaded, err := runBinding(t, binding, `--tags=cli`)
+func TestManagerScalarCollectionsReplaceDefaults(t *testing.T) {
+	manager := New(bindingDefaults())
+	loaded, err := runManager(t, manager, `--tags=cli`)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"cli"}, loaded.Server.Tags)
 }
 
-func TestBindingRejectsInvalidStructValues(t *testing.T) {
-	definition := New(bindingDefaults())
-	binding := definition.Bind(Command("server"))
+func TestManagerRejectsInvalidStructValues(t *testing.T) {
+	manager := New(bindingDefaults())
 	tests := []struct {
 		name string
 		args []string
@@ -224,7 +210,7 @@ func TestBindingRejectsInvalidStructValues(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := runBinding(t, binding, test.args...)
+			_, err := runManager(t, manager, test.args...)
 			require.ErrorContains(t, err, test.want)
 		})
 	}
@@ -232,11 +218,11 @@ func TestBindingRejectsInvalidStructValues(t *testing.T) {
 
 type bindingEndpoint string
 
-func TestBindingUsesRegisteredCodec(t *testing.T) {
+func TestManagerUsesRegisteredCodec(t *testing.T) {
 	type codecConfig struct {
 		Endpoint bindingEndpoint `json:"endpoint" desc:"服务端点"`
 	}
-	definition := New(codecConfig{}, WithCodec(Codec[bindingEndpoint]{
+	manager := New(codecConfig{}, WithCodec(Codec[bindingEndpoint]{
 		Parse: func(value string) (bindingEndpoint, error) {
 			if !strings.HasPrefix(value, "svc://") {
 				return "", errors.New("scheme must be svc")
@@ -245,26 +231,18 @@ func TestBindingUsesRegisteredCodec(t *testing.T) {
 		},
 		Format: func(value bindingEndpoint) string { return string(value) },
 	}))
-	binding := definition.Bind()
-
 	var loaded *codecConfig
-	cmd := &cli.Command{
-		Name:  "app",
-		Flags: binding.Flags(),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			var err error
-			loaded, err = binding.Load(ctx, cmd)
-			return err
-		},
-	}
+	cmd := configuredRoot(t, manager, func(_ context.Context, _ *cli.Command, cfg *codecConfig) error {
+		loaded = cfg
+		return nil
+	})
 	require.NoError(t, cmd.Run(t.Context(), []string{"app", "--endpoint=svc://main"}))
 	assert.Equal(t, bindingEndpoint("svc://main"), loaded.Endpoint)
 	require.ErrorContains(t, cmd.Run(t.Context(), []string{"app", "--endpoint=http://main"}), "scheme must be svc")
 }
 
-func TestBindingRejectsUnknownFileFieldsInsideStructSlices(t *testing.T) {
-	definition := New(bindingDefaults())
-	binding := definition.Bind(Command("server"))
+func TestManagerRejectsUnknownFileFieldsInsideStructSlices(t *testing.T) {
+	manager := New(bindingDefaults())
 	configPath := writeTempConfig(t, `
 server:
   certificates:
@@ -274,11 +252,11 @@ server:
       unknown: true
 `)
 
-	_, err := runBindingWithRootArgs(t, binding, []string{"--config", configPath})
+	_, err := runManagerWithRootArgs(t, manager, []string{"--config", configPath})
 	require.ErrorContains(t, err, "unknown")
 }
 
-func TestDefinitionLoadsCompositeEnvironmentValuesAsJSON(t *testing.T) {
+func TestManagerLoadsCompositeEnvironmentValuesAsJSON(t *testing.T) {
 	type Config struct {
 		Tags         []string                `json:"tags"`
 		Labels       map[string]string       `json:"labels"`
@@ -297,7 +275,7 @@ func TestDefinitionLoadsCompositeEnvironmentValuesAsJSON(t *testing.T) {
 	assert.Equal(t, 15*time.Second, cfg.Certificates[0].Refresh)
 }
 
-func TestDefinitionEnvironmentCanSetEmptyScalar(t *testing.T) {
+func TestManagerEnvironmentCanSetEmptyScalar(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
@@ -307,7 +285,7 @@ func TestDefinitionEnvironmentCanSetEmptyScalar(t *testing.T) {
 	assert.Empty(t, cfg.Name)
 }
 
-func TestDefinitionRejectsInvalidCompositeEnvironmentValues(t *testing.T) {
+func TestManagerRejectsInvalidCompositeEnvironmentValues(t *testing.T) {
 	type Config struct {
 		Tags []string `json:"tags"`
 	}
@@ -317,7 +295,7 @@ func TestDefinitionRejectsInvalidCompositeEnvironmentValues(t *testing.T) {
 	require.ErrorContains(t, err, "JSON")
 }
 
-func TestDefinitionRejectsDeepUnknownFields(t *testing.T) {
+func TestManagerRejectsDeepUnknownFields(t *testing.T) {
 	type Config struct {
 		Routes []bindingRoute `json:"routes"`
 	}
@@ -332,20 +310,19 @@ routes:
 	require.ErrorContains(t, err, "routes.backends.typo")
 }
 
-func TestBindingRejectsDeepUnknownStructFlagFields(t *testing.T) {
-	definition := New(bindingDefaults())
-	binding := definition.Bind(Command("server"))
-	_, err := runBinding(t, binding,
+func TestManagerRejectsDeepUnknownStructFlagFields(t *testing.T) {
+	manager := New(bindingDefaults())
+	_, err := runManager(t, manager,
 		`--routes={"path":"/api","backends":[{"url":"https://api.example.com","typo":true}]}`,
 	)
 	require.ErrorContains(t, err, "backends.typo")
 }
 
-func TestDefinitionCodecAppliesToFileAndEnvironment(t *testing.T) {
+func TestManagerCodecAppliesToFileAndEnvironment(t *testing.T) {
 	type Config struct {
 		Endpoint bindingEndpoint `json:"endpoint"`
 	}
-	definition := New(Config{}, WithoutDefaultPaths(), WithCodec(Codec[bindingEndpoint]{
+	manager := New(Config{}, WithoutDefaultPaths(), WithCodec(Codec[bindingEndpoint]{
 		Parse: func(value string) (bindingEndpoint, error) {
 			if !strings.HasPrefix(value, "svc://") {
 				return "", errors.New("scheme must be svc")
@@ -354,25 +331,25 @@ func TestDefinitionCodecAppliesToFileAndEnvironment(t *testing.T) {
 		},
 	}))
 	path := writeTempConfig(t, "endpoint: svc://file\n")
-	cfg, err := definition.Load(t.Context(), File(path))
+	cfg, err := manager.Load(t.Context(), File(path))
 	require.NoError(t, err)
 	assert.Equal(t, bindingEndpoint("svc://file"), cfg.Endpoint)
 
 	t.Setenv("APP_ENDPOINT", "svc://env")
-	cfg, err = definition.Load(t.Context(), Env("APP_"))
+	cfg, err = manager.Load(t.Context(), Env("APP_"))
 	require.NoError(t, err)
 	assert.Equal(t, bindingEndpoint("svc://env"), cfg.Endpoint)
 
 	path = writeTempConfig(t, "endpoint: http://invalid\n")
-	_, err = definition.Load(t.Context(), File(path))
+	_, err = manager.Load(t.Context(), File(path))
 	require.ErrorContains(t, err, "scheme must be svc")
 
 	path = writeTempConfig(t, "endpoint: 42\n")
-	_, err = definition.Load(t.Context(), File(path))
+	_, err = manager.Load(t.Context(), File(path))
 	require.ErrorContains(t, err, "must be a string for codec")
 }
 
-func TestDefinitionRejectsInvalidOptionsAndSchema(t *testing.T) {
+func TestManagerRejectsInvalidOptionsAndSchema(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
@@ -386,7 +363,7 @@ func TestDefinitionRejectsInvalidOptionsAndSchema(t *testing.T) {
 	assert.Panics(t, func() { New((*Config)(nil)) })
 }
 
-func TestBindingTreatsCodecStructAsLeaf(t *testing.T) {
+func TestManagerTreatsCodecStructAsLeaf(t *testing.T) {
 	type Endpoint struct {
 		Scheme string
 		Name   string
@@ -394,7 +371,7 @@ func TestBindingTreatsCodecStructAsLeaf(t *testing.T) {
 	type Config struct {
 		Endpoint Endpoint `json:"endpoint"`
 	}
-	definition := New(Config{}, WithCodec(Codec[Endpoint]{
+	manager := New(Config{}, WithCodec(Codec[Endpoint]{
 		Parse: func(value string) (Endpoint, error) {
 			parts := strings.SplitN(value, "://", 2)
 			if len(parts) != 2 {
@@ -404,11 +381,11 @@ func TestBindingTreatsCodecStructAsLeaf(t *testing.T) {
 		},
 		Format: func(value Endpoint) string { return value.Scheme + "://" + value.Name },
 	}))
-	binding := definition.Bind()
-	requireFlagType[*cli.StringFlag](t, binding.Flags(), "endpoint")
+	root := configuredRoot(t, manager, func(context.Context, *cli.Command, *Config) error { return nil })
+	requireFlagType[*cli.StringFlag](t, root.Flags, "endpoint")
 }
 
-func TestBindingUsesCodecInsideStructSlice(t *testing.T) {
+func TestManagerUsesCodecInsideStructSlice(t *testing.T) {
 	type Endpoint struct {
 		Name string
 	}
@@ -418,60 +395,54 @@ func TestBindingUsesCodecInsideStructSlice(t *testing.T) {
 	type Config struct {
 		Services []Service `json:"services"`
 	}
-	definition := New(Config{}, WithCodec(Codec[Endpoint]{
+	manager := New(Config{}, WithCodec(Codec[Endpoint]{
 		Parse: func(value string) (Endpoint, error) { return Endpoint{Name: value}, nil },
 	}))
-	binding := definition.Bind()
 	var loaded *Config
-	cmd := &cli.Command{
-		Name:  "app",
-		Flags: binding.Flags(),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			var err error
-			loaded, err = binding.Load(ctx, cmd)
-			return err
-		},
-	}
+	cmd := configuredRoot(t, manager, func(_ context.Context, _ *cli.Command, cfg *Config) error {
+		loaded = cfg
+		return nil
+	})
 	require.NoError(t, cmd.Run(t.Context(), []string{"app", `--services={"endpoint":"main"}`}))
 	require.Len(t, loaded.Services, 1)
 	assert.Equal(t, "main", loaded.Services[0].Endpoint.Name)
 }
 
-func TestBindingSupportsNamedScalarTypes(t *testing.T) {
+func TestManagerSupportsNamedScalarTypes(t *testing.T) {
 	type Name string
 	type Count int
 	type Config struct {
 		Name  Name  `json:"name"`
 		Count Count `json:"count"`
 	}
-	definition := New(Config{Name: "default", Count: 2})
-	binding := definition.Bind()
-	requireFlagType[*cli.StringFlag](t, binding.Flags(), "name")
-	requireFlagType[*cli.IntFlag](t, binding.Flags(), "count")
+	manager := New(Config{Name: "default", Count: 2})
+	root := configuredRoot(t, manager, func(context.Context, *cli.Command, *Config) error { return nil })
+	requireFlagType[*cli.StringFlag](t, root.Flags, "name")
+	requireFlagType[*cli.IntFlag](t, root.Flags, "count")
 }
 
-func TestBindingSupportsNamedScalarSliceTypes(t *testing.T) {
+func TestManagerSupportsNamedScalarSliceTypes(t *testing.T) {
 	type Name string
 	type Names []Name
 	type Config struct {
 		Names Names `json:"names"`
 	}
-	definition := New(Config{Names: Names{"default"}})
-	binding := definition.Bind()
-	requireFlagType[*cli.StringSliceFlag](t, binding.Flags(), "names")
+	manager := New(Config{Names: Names{"default"}})
+	root := configuredRoot(t, manager, func(context.Context, *cli.Command, *Config) error { return nil })
+	requireFlagType[*cli.StringSliceFlag](t, root.Flags, "names")
 }
 
-func TestBindingSupportsNamedStringMapTypes(t *testing.T) {
+func TestManagerSupportsNamedStringMapTypes(t *testing.T) {
 	type Labels map[string]string
 	type Config struct {
 		Labels Labels `json:"labels"`
 	}
-	definition := New(Config{Labels: Labels{"default": "yes"}})
-	binding := definition.Bind()
-	requireFlagType[*cli.StringMapFlag](t, binding.Flags(), "labels")
+	manager := New(Config{Labels: Labels{"default": "yes"}})
+	root := configuredRoot(t, manager, func(context.Context, *cli.Command, *Config) error { return nil })
+	requireFlagType[*cli.StringMapFlag](t, root.Flags, "labels")
 }
 
-func TestDefinitionRejectsAmbiguousSchemaKeys(t *testing.T) {
+func TestManagerRejectsAmbiguousSchemaKeys(t *testing.T) {
 	assert.PanicsWithError(t, `cfgm: duplicate config path "name"`, func() {
 		typ := reflect.StructOf([]reflect.StructField{
 			{Name: "First", Type: reflect.TypeFor[string](), Tag: `json:"name"`},
@@ -490,27 +461,20 @@ func TestDefinitionRejectsAmbiguousSchemaKeys(t *testing.T) {
 	assert.Panics(t, func() { New(Node{}) })
 }
 
-func TestBindingRejectsInvalidPathsAndAliases(t *testing.T) {
-	definition := New(bindingDefaults())
+func TestManagerRejectsInvalidCLIOptions(t *testing.T) {
 	tests := []struct {
-		name string
-		bind func()
-		want string
+		name  string
+		build func()
+		want  string
 	}{
-		{name: "command", bind: func() { definition.Bind(Command("missing")) }, want: "command path"},
-		{name: "empty command", bind: func() { definition.Bind(Command()) }, want: "requires"},
-		{name: "invalid command", bind: func() { definition.Bind(Command("server.child")) }, want: "invalid command"},
-		{name: "duplicate command", bind: func() { definition.Bind(Command("server"), Command("server")) }, want: "already"},
-		{name: "no CLI", bind: func() { definition.Bind(Command("server"), NoCLI("missing")) }, want: "no-CLI"},
-		{name: "alias path", bind: func() { definition.Bind(Command("server"), Alias("missing", "m")) }, want: "alias path"},
-		{name: "excluded alias", bind: func() {
-			definition.Bind(Command("server"), NoCLI("redis"), Alias("redis.url", "r"))
-		}, want: "excluded"},
-		{name: "reserved alias", bind: func() { definition.Bind(Command("server"), Alias("addr", "c")) }, want: "reserved"},
-		{name: "help alias", bind: func() { definition.Bind(Command("server"), Alias("addr", "h")) }, want: "reserved"},
-		{name: "alias collision", bind: func() {
-			definition.Bind(Command("server"), Alias("addr", "x"), Alias("debug", "x"))
-		}, want: "ambiguous"},
+		{name: "hidden path", build: func() { New(bindingDefaults(), HideCLI("missing")) }, want: "hidden CLI path"},
+		{name: "alias path", build: func() { New(bindingDefaults(), CLIAlias("missing", "m")) }, want: "alias path"},
+		{name: "hidden alias", build: func() {
+			New(bindingDefaults(), HideCLI("server.redis"), CLIAlias("server.redis.url", "r"))
+		}, want: "hidden"},
+		{name: "reserved alias", build: func() { New(bindingDefaults(), CLIAlias("server.addr", "c")) }, want: "reserved"},
+		{name: "help alias", build: func() { New(bindingDefaults(), CLIAlias("server.addr", "h")) }, want: "reserved"},
+		{name: "duplicate alias", build: func() { New(bindingDefaults(), CLIAlias("server.addr", "x", "x")) }, want: "duplicate"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -519,22 +483,86 @@ func TestBindingRejectsInvalidPathsAndAliases(t *testing.T) {
 				require.NotNil(t, value)
 				assert.Contains(t, fmt.Sprint(value), test.want)
 			}()
-			test.bind()
+			test.build()
 		})
 	}
 }
 
-func TestBindingRejectsGeneratedReservedNames(t *testing.T) {
+func TestManagerConfigureRejectsInvalidCommandTrees(t *testing.T) {
+	manager := New(bindingDefaults(), CLIAlias("server.addr", "x"), CLIAlias("server.debug", "x"))
+	server := &cli.Command{Name: "server", Action: manager.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil })}
+	require.ErrorContains(t, manager.Configure(&cli.Command{Name: "app", Commands: []*cli.Command{server}}), "ambiguous")
+
+	require.ErrorContains(t, New(bindingDefaults()).Configure(nil), "nil")
+	invalid := New(bindingDefaults())
+	require.ErrorContains(t, invalid.Configure(&cli.Command{Name: "app", Commands: []*cli.Command{{Name: "bad.name"}}}), "invalid command")
+
+	collision := New(bindingDefaults())
+	server = &cli.Command{
+		Name:   "server",
+		Flags:  []cli.Flag{&cli.StringFlag{Name: "addr"}},
+		Action: collision.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil }),
+	}
+	require.ErrorContains(t, collision.Configure(&cli.Command{Name: "app", Commands: []*cli.Command{server}}), "ambiguous")
+
+	missing := New(bindingDefaults())
+	other := &cli.Command{Name: "other", Action: missing.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil })}
+	root := &cli.Command{Name: "app", Commands: []*cli.Command{other}}
+	missing.MustConfigure(root)
+	require.ErrorContains(t, root.Run(t.Context(), []string{"app", "other"}), "was not configured")
+}
+
+func TestManagerActionRejectsAnUnconfiguredCommandTree(t *testing.T) {
+	manager := New(bindingDefaults())
+	configured := &cli.Command{
+		Name: "app",
+		Commands: []*cli.Command{{
+			Name:   "server",
+			Action: manager.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil }),
+		}},
+	}
+	manager.MustConfigure(configured)
+
+	unconfigured := &cli.Command{
+		Name: "app",
+		Commands: []*cli.Command{{
+			Name:   "server",
+			Action: manager.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil }),
+		}},
+	}
+	require.ErrorContains(
+		t,
+		unconfigured.Run(t.Context(), []string{"app", "server"}),
+		"was not configured by this manager",
+	)
+}
+
+func TestManagerConfigureIsTransactional(t *testing.T) {
+	manager := New(bindingDefaults())
+	root := &cli.Command{
+		Name: "app",
+		Commands: []*cli.Command{
+			{
+				Name:   "server",
+				Flags:  []cli.Flag{&cli.StringFlag{Name: "addr"}},
+				Action: manager.Action(func(context.Context, *cli.Command, *bindingTestConfig) error { return nil }),
+			},
+		},
+	}
+	require.ErrorContains(t, manager.Configure(root), "ambiguous")
+	assert.Empty(t, root.Flags)
+	assert.Len(t, root.Commands[0].Flags, 1)
+}
+
+func TestManagerRejectsGeneratedReservedNames(t *testing.T) {
 	type Config struct {
 		Config string `json:"config"`
 	}
-	definition := New(Config{})
-	assert.PanicsWithError(t, "cfgm: generated CLI flag --config is reserved by root flags", func() {
-		definition.Bind()
-	})
+	manager := New(Config{})
+	require.ErrorContains(t, manager.Configure(&cli.Command{Name: "app"}), "reserved")
 }
 
-func TestDefinitionAllowsNullCollections(t *testing.T) {
+func TestManagerAllowsNullCollections(t *testing.T) {
 	type Config struct {
 		Names  []string          `json:"names"`
 		Labels map[string]string `json:"labels"`
@@ -546,62 +574,53 @@ func TestDefinitionAllowsNullCollections(t *testing.T) {
 	assert.Nil(t, cfg.Labels)
 }
 
-func TestBindingSupportsNilCompositeDefaultsAndTimestamps(t *testing.T) {
+func TestManagerSupportsNilCompositeDefaultsAndTimestamps(t *testing.T) {
 	type Config struct {
 		Tags   []string          `json:"tags"`
 		Labels map[string]string `json:"labels"`
 		At     time.Time         `json:"at"`
 	}
-	definition := New(Config{})
-	binding := definition.Bind()
-	requireFlagType[*cli.StringSliceFlag](t, binding.Flags(), "tags")
-	requireFlagType[*cli.StringMapFlag](t, binding.Flags(), "labels")
-	requireFlagType[*cli.TimestampFlag](t, binding.Flags(), "at")
-
+	manager := New(Config{})
 	var loaded *Config
-	cmd := &cli.Command{
-		Name:  "app",
-		Flags: binding.Flags(),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			var err error
-			loaded, err = binding.Load(ctx, cmd)
-			return err
-		},
-	}
+	cmd := configuredRoot(t, manager, func(_ context.Context, _ *cli.Command, cfg *Config) error {
+		loaded = cfg
+		return nil
+	})
+	requireFlagType[*cli.StringSliceFlag](t, cmd.Flags, "tags")
+	requireFlagType[*cli.StringMapFlag](t, cmd.Flags, "labels")
+	requireFlagType[*cli.TimestampFlag](t, cmd.Flags, "at")
 	require.NoError(t, cmd.Run(t.Context(), []string{"app", "--at=2026-07-15T10:20:30Z"}))
 	assert.Equal(t, time.Date(2026, 7, 15, 10, 20, 30, 0, time.UTC), loaded.At)
 }
 
-func runBinding(
+func runManager(
 	t *testing.T,
-	binding *Binding[bindingTestConfig],
+	manager *Manager[bindingTestConfig],
 	args ...string,
 ) (*bindingTestConfig, error) {
 	t.Helper()
-	return runBindingWithRootArgs(t, binding, nil, args...)
+	return runManagerWithRootArgs(t, manager, nil, args...)
 }
 
-func runBindingWithRootArgs(
+func runManagerWithRootArgs(
 	t *testing.T,
-	binding *Binding[bindingTestConfig],
+	manager *Manager[bindingTestConfig],
 	rootArgs []string,
 	args ...string,
 ) (*bindingTestConfig, error) {
 	t.Helper()
 	var loaded *bindingTestConfig
 	root := &cli.Command{
-		Name:  "app",
-		Flags: RootFlags(),
+		Name: "app",
 		Commands: []*cli.Command{{
-			Name:  "server",
-			Flags: binding.Flags(),
-			Action: func(ctx context.Context, cmd *cli.Command) error {
-				var err error
-				loaded, err = binding.Load(ctx, cmd)
-				return err
-			},
+			Name: "server",
+			Action: manager.Action(func(_ context.Context, _ *cli.Command, cfg *bindingTestConfig) error {
+				loaded = cfg
+				return nil
+			}),
 		}},
 	}
+	manager.MustConfigure(root)
 	commandArgs := append([]string{"app"}, rootArgs...)
 	commandArgs = append(commandArgs, "server")
 	commandArgs = append(commandArgs, args...)
@@ -625,4 +644,11 @@ func findFlag(flags []cli.Flag, name string) cli.Flag {
 		}
 	}
 	return nil
+}
+
+func configuredRoot[T any](t *testing.T, manager *Manager[T], run ActionFunc[T]) *cli.Command {
+	t.Helper()
+	root := &cli.Command{Name: "app", Action: manager.Action(run)}
+	manager.MustConfigure(root)
+	return root
 }

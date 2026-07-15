@@ -18,7 +18,7 @@ func writeTempConfig(t *testing.T, content string) string {
 	return path
 }
 
-func TestDefinitionLoadsExplicitSourcesInOrder(t *testing.T) {
+func TestManagerLoadsExplicitSourcesInOrder(t *testing.T) {
 	type Config struct {
 		Name  string `json:"name"`
 		Debug bool   `json:"debug"`
@@ -32,18 +32,18 @@ func TestDefinitionLoadsExplicitSourcesInOrder(t *testing.T) {
 	assert.True(t, cfg.Debug)
 }
 
-func TestDefinitionMustLoadPanicsOnError(t *testing.T) {
+func TestManagerMustLoadPanicsOnError(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
-	definition := New(Config{}, WithoutDefaultPaths())
+	manager := New(Config{}, WithoutDefaultPaths())
 	assert.PanicsWithValue(t,
 		"cfgm: failed to load config: file:/missing/config.yaml: none of the config files exist: /missing/config.yaml",
-		func() { definition.MustLoad(t.Context(), File("/missing/config.yaml")) },
+		func() { manager.MustLoad(t.Context(), File("/missing/config.yaml")) },
 	)
 }
 
-func TestDefinitionLoadReportAndLogger(t *testing.T) {
+func TestManagerLoadReportAndLogger(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
@@ -60,7 +60,7 @@ func TestDefinitionLoadReportAndLogger(t *testing.T) {
 	assert.Contains(t, logs.String(), "Loaded config source")
 }
 
-func TestDefinitionSearchesDefaultPaths(t *testing.T) {
+func TestManagerSearchesDefaultPaths(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
@@ -106,7 +106,7 @@ func TestDefaultPathOrderAndOptions(t *testing.T) {
 	assert.Equal(t, "explicit", cfg.Name)
 }
 
-func TestDefinitionDefaultPathsAreOptional(t *testing.T) {
+func TestManagerDefaultPathsAreOptional(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
@@ -116,7 +116,7 @@ func TestDefinitionDefaultPathsAreOptional(t *testing.T) {
 	assert.Equal(t, "default", cfg.Name)
 }
 
-func TestDefinitionUnknownKeyPolicy(t *testing.T) {
+func TestManagerUnknownKeyPolicy(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
@@ -140,23 +140,23 @@ func TestAllowUnknownKeysStillValidatesKnownFieldShapes(t *testing.T) {
 	require.ErrorContains(t, err, `config key "names" must be an array`)
 }
 
-func TestDefinitionNullableStructs(t *testing.T) {
+func TestManagerNullableStructs(t *testing.T) {
 	type Provider struct {
 		Issuer string `json:"issuer"`
 	}
 	type Config struct {
 		Provider *Provider `json:"provider"`
 	}
-	definition := New(Config{}, WithoutDefaultPaths())
+	manager := New(Config{}, WithoutDefaultPaths())
 
 	path := writeTempConfig(t, "provider:\n  issuer: https://auth.example.com\n")
-	cfg, err := definition.Load(t.Context(), File(path))
+	cfg, err := manager.Load(t.Context(), File(path))
 	require.NoError(t, err)
 	require.NotNil(t, cfg.Provider)
 	assert.Equal(t, "https://auth.example.com", cfg.Provider.Issuer)
 
 	path = writeTempConfig(t, "provider: {}\n")
-	cfg, err = definition.Load(t.Context(), File(path))
+	cfg, err = manager.Load(t.Context(), File(path))
 	require.NoError(t, err)
 	require.NotNil(t, cfg.Provider)
 
@@ -166,7 +166,7 @@ func TestDefinitionNullableStructs(t *testing.T) {
 	assert.Nil(t, cfg.Provider)
 }
 
-func TestDefinitionRejectsUnknownSiblingOfNullableStruct(t *testing.T) {
+func TestManagerRejectsUnknownSiblingOfNullableStruct(t *testing.T) {
 	type Provider struct {
 		Issuer string `json:"issuer"`
 	}
@@ -182,16 +182,16 @@ func TestFileOptionalAndRequired(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
-	definition := New(Config{Name: "default"}, WithoutDefaultPaths())
-	cfg, err := definition.Load(t.Context(), File("/path/does/not/exist.yaml", Optional()))
+	manager := New(Config{Name: "default"}, WithoutDefaultPaths())
+	cfg, err := manager.Load(t.Context(), File("/path/does/not/exist.yaml", Optional()))
 	require.NoError(t, err)
 	assert.Equal(t, "default", cfg.Name)
 
-	_, err = definition.Load(t.Context(), File("/path/does/not/exist.yaml"))
+	_, err = manager.Load(t.Context(), File("/path/does/not/exist.yaml"))
 	require.ErrorContains(t, err, "none of the config files exist")
 }
 
-func TestDefinitionTemplateExpansion(t *testing.T) {
+func TestManagerTemplateExpansion(t *testing.T) {
 	type Config struct {
 		Name     string `json:"name"`
 		Fallback string `json:"fallback"`
@@ -211,7 +211,7 @@ func TestDefinitionTemplateExpansion(t *testing.T) {
 	assert.Equal(t, "${CFG_DEFAULT}", cfg.Fallback)
 }
 
-func TestDefinitionRejectsNilContext(t *testing.T) {
+func TestManagerRejectsNilContext(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}
@@ -242,7 +242,7 @@ func TestDefaultPaths(t *testing.T) {
 	assert.Len(t, DefaultPaths("app"), 15)
 }
 
-func TestDefinitionHonorsCanceledContext(t *testing.T) {
+func TestManagerHonorsCanceledContext(t *testing.T) {
 	type Config struct {
 		Name string `json:"name"`
 	}

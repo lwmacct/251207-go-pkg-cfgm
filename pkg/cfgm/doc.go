@@ -1,40 +1,38 @@
 // Package cfgm provides Schema-driven configuration for Go applications.
 //
-// A Definition owns defaults, validation, codecs, file and environment
-// loading, generated urfave/cli flags, and config examples:
+// A Manager owns defaults, validation, codecs, file and environment loading,
+// generated urfave/cli flags, typed actions, and config examples:
 //
-//	definition := cfgm.New(DefaultConfig(), cfgm.AppName("app"))
-//	config, err := definition.Load(ctx, cfgm.Env("APP_"))
+//	manager := cfgm.New(DefaultConfig(), cfgm.AppName("app"))
+//	config, err := manager.Load(ctx, cfgm.Env("APP_"))
 //
-// Later sources replace earlier values. Definition.Load searches optional
+// Later sources replace earlier values. Manager.Load searches optional
 // DefaultPaths before caller-provided sources unless WithoutDefaultPaths is
 // set. Unknown keys are rejected by default.
 //
 // # CLI Integration
 //
-// RootFlags returns the root --config/-c and --env-prefix/-e flags. Command
-// declares the CLI command lineage whose matching config subtree Bind exposes:
+// Manager.Configure walks a completed urfave command tree. It adds root
+// --config/-c and --env-prefix/-e flags and projects each actionable command's
+// matching config subtree into typed local flags:
 //
-//	binding := definition.Bind(
-//	    cfgm.Command("server"),
-//	    cfgm.Alias("addr", "a"),
-//	    cfgm.NoCLI("redis.password"),
+//	manager := cfgm.New(DefaultConfig(),
+//	    cfgm.CLIAlias("server.addr", "a"),
+//	    cfgm.HideCLI("server.redis.password"),
 //	)
-//
 //	command := &cli.Command{
-//	    Name:  "server",
-//	    Flags: binding.Flags(),
-//	    Action: func(ctx context.Context, cmd *cli.Command) error {
-//	        config, err := binding.Load(ctx, cmd)
-//	        return run(ctx, config, err)
-//	    },
+//	    Name: "server",
+//	    Action: manager.Action(func(ctx context.Context, cmd *cli.Command, config *Config) error {
+//	        return run(ctx, config)
+//	    }),
 //	}
+//	root := &cli.Command{Name: "app", Commands: []*cli.Command{command}}
+//	manager.MustConfigure(root)
 //
 // Command paths map directly to json-tagged config structs. The example maps
-// Config.Server to the server command, so option paths are relative to server.
-// Binding.Load verifies the actual urfave command lineage and then applies
-// defaults, default paths, an explicit config file, the selected environment
-// prefix, and explicitly set CLI flags in that order.
+// Config.Server to the server command, so server.addr becomes --addr.
+// Manager.Action applies defaults, default paths, an explicit config file, the
+// selected environment prefix, and explicitly set CLI flags in that order.
 //
 // # Composite Values
 //
@@ -45,5 +43,5 @@
 //
 // WithCodec registers parsing for custom leaf types across files, environment
 // variables, and CLI flags. ConfigFiles validates runtime files with the same
-// Definition Schema used by loading.
+// Manager Schema used by loading.
 package cfgm

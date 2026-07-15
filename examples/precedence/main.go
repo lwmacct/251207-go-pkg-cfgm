@@ -22,28 +22,22 @@ func main() {
 	var defaults config
 	defaults.Server.Addr = ":7000"
 	defaults.Server.Timeout = 30 * time.Second
-	definition := cfgm.New(defaults, cfgm.AppName("precedence"), cfgm.WithoutDefaultPaths())
-	binding := definition.Bind(cfgm.Command("server"))
+	manager := cfgm.New(defaults, cfgm.AppName("precedence"), cfgm.WithoutDefaultPaths())
 
 	app := &cli.Command{
-		Name:  "precedence",
-		Flags: cfgm.RootFlags(),
+		Name: "precedence",
 		Commands: []*cli.Command{{
-			Name:  "server",
-			Flags: binding.Flags(),
-			Action: func(ctx context.Context, cmd *cli.Command) error {
-				loaded, report, err := binding.LoadReport(ctx, cmd)
-				if err != nil {
-					return err
-				}
+			Name: "server",
+			Action: manager.ActionReport(func(_ context.Context, _ *cli.Command, loaded *config, report *cfgm.Report) error {
 				_, _ = fmt.Fprintf(os.Stdout, "addr=%s timeout=%s\n", loaded.Server.Addr, loaded.Server.Timeout)
 				for _, source := range report.Sources {
 					_, _ = fmt.Fprintf(os.Stdout, "source=%s keys=%v\n", source.Name, source.Keys)
 				}
 				return nil
-			},
+			}),
 		}},
 	}
+	manager.MustConfigure(app)
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)

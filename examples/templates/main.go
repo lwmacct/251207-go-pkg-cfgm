@@ -17,12 +17,12 @@ type config struct {
 
 func main() {
 	ctx := context.Background()
-	definition := cfgm.New(config{}, cfgm.WithoutDefaultPaths())
-	expanded, err := definition.Load(ctx, cfgm.File("examples/templates/config.yaml"))
+	manager := cfgm.New(config{}, cfgm.WithoutDefaultPaths())
+	expanded, err := manager.Load(ctx, cfgm.File("examples/templates/config.yaml"))
 	if err != nil {
 		exit(err)
 	}
-	raw, err := definition.Load(ctx, cfgm.File("examples/templates/config.yaml", cfgm.Raw()))
+	raw, err := manager.Load(ctx, cfgm.File("examples/templates/config.yaml", cfgm.Raw()))
 	if err != nil {
 		exit(err)
 	}

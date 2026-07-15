@@ -43,25 +43,20 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	definition := cfgm.New(
+	manager := cfgm.New(
 		config{Endpoint: defaultEndpoint},
 		cfgm.AppName("codec"),
 		cfgm.WithoutDefaultPaths(),
 		cfgm.WithCodec(cfgm.Codec[endpoint]{Parse: parseEndpoint, Format: endpoint.String}),
 	)
-	binding := definition.Bind()
 	app := &cli.Command{
-		Name:  "codec",
-		Flags: append(cfgm.RootFlags(), binding.Flags()...),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			loaded, err := binding.Load(ctx, cmd)
-			if err != nil {
-				return err
-			}
+		Name: "codec",
+		Action: manager.Action(func(_ context.Context, _ *cli.Command, loaded *config) error {
 			_, _ = fmt.Fprintln(os.Stdout, loaded.Endpoint.String())
 			return nil
-		},
+		}),
 	}
+	manager.MustConfigure(app)
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)

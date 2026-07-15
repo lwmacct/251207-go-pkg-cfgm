@@ -41,8 +41,8 @@ func main() {
 			"token":    "secret",
 		},
 	}}
-	definition := cfgm.New(config{}, cfgm.WithoutDefaultPaths())
-	loaded, report, err := definition.LoadReport(context.Background(), source)
+	manager := cfgm.New(config{}, cfgm.WithoutDefaultPaths())
+	loaded, report, err := manager.LoadReport(context.Background(), source)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

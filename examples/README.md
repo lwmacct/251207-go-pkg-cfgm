@@ -5,13 +5,13 @@
 | 示例 | 主题 |
 | --- | --- |
 | [`basic`](basic) | 默认值、配置文件和环境变量 |
-| [`cli`](cli) | 自动生成 CLI flags，使用 `Scope`、`Include`、`Alias`、`NoCLI` |
+| [`cli`](cli) | 自动装配 CLI flags、alias、隐藏字段和 typed action |
 | [`precedence`](precedence) | defaults → file → env → CLI 优先级和 `LoadReport` |
 | [`composite`](composite) | 标量 slice、`[]struct`、JSON object flags 和显式清空 |
 | [`codec`](codec) | 文件、环境变量和 CLI 共用自定义 codec |
 | [`validation`](validation) | 严格未知字段校验、`AllowUnknownKeys` 和已知字段类型校验 |
 | [`templates`](templates) | `${...}`、`Raw`、`ExpandTemplates` 和全局模板策略 |
-| [`config-files`](config-files) | 生成 example YAML 并用同一 `Definition` 校验运行配置 |
+| [`config-files`](config-files) | 生成 example YAML 并用同一 `Manager` 校验运行配置 |
 | [`custom-source`](custom-source) | 实现自定义 `Source` 并读取 `Schema` |
 
 ## Basic
@@ -25,7 +25,7 @@ APP_ENDPOINT=https://localhost:8443 APP_TIMEOUT=5s \
 
 ## CLI
 
-`cfgm.RootFlags()` 生成根 `--config/-c` 和 `--env-prefix/-e`，`Binding.Flags()` 生成配置字段 flags：
+`Manager.MustConfigure()` 遍历命令树，生成根 `--config/-c`、`--env-prefix/-e` 和各命令的配置 flags：
 
 ```bash
 go run ./examples/cli server \
@@ -34,7 +34,7 @@ go run ./examples/cli server \
   --redis.url=redis://localhost:6379/1
 ```
 
-`redis.password` 通过 `NoCLI` 排除，不会成为命令行参数。
+`server.redis.password` 通过 `HideCLI` 排除，不会成为命令行参数。
 
 ## Precedence
 
@@ -122,7 +122,7 @@ go run ./examples/config-files
 go test -v ./examples/config-files
 ```
 
-生成与校验使用同一个 `Definition`，不会产生第二套 Schema。
+生成与校验使用同一个 `Manager`，不会产生第二套 Schema。
 
 ## Custom Source
 

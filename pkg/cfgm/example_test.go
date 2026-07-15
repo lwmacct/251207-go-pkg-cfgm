@@ -60,17 +60,17 @@ func Example_exampleYAML() {
 	//   port: 8080 # 服务器端口
 }
 
-func ExampleDefinition_Load() {
+func ExampleManager_Load() {
 	type Config struct {
 		Name  string `json:"name"`
 		Debug bool   `json:"debug"`
 	}
 
-	definition := cfgm.New(Config{
+	manager := cfgm.New(Config{
 		Name:  "default-app",
 		Debug: false,
 	}, cfgm.WithoutDefaultPaths())
-	cfg, err := definition.Load(context.Background())
+	cfg, err := manager.Load(context.Background())
 	if err != nil {
 		fmt.Println("加载失败:", err)
 
@@ -85,14 +85,14 @@ func ExampleDefinition_Load() {
 	// Debug: false
 }
 
-func ExampleDefinition_Load_withEnv() {
+func ExampleManager_Load_withEnv() {
 	type Config struct {
 		Name  string `json:"name"`
 		Debug bool   `json:"debug"`
 	}
 
-	definition := cfgm.New(Config{Name: "default-app"}, cfgm.WithoutDefaultPaths())
-	cfg, err := definition.Load(context.Background(), cfgm.Env("APP_"))
+	manager := cfgm.New(Config{Name: "default-app"}, cfgm.WithoutDefaultPaths())
+	cfg, err := manager.Load(context.Background(), cfgm.Env("APP_"))
 	if err != nil {
 		fmt.Println("加载失败:", err)
 
@@ -141,7 +141,7 @@ func Example_marshalJSON() {
 	// }
 }
 
-func ExampleDefinition_Load_withJSONConfig() {
+func ExampleManager_Load_withJSONConfig() {
 	type Config struct {
 		Name  string `json:"name"`
 		Debug bool   `json:"debug"`
@@ -159,8 +159,8 @@ func ExampleDefinition_Load_withJSONConfig() {
 	}
 	defer func() { _ = os.Remove(tmpFile) }()
 
-	definition := cfgm.New(Config{Name: "default-app"}, cfgm.WithoutDefaultPaths())
-	cfg, err := definition.Load(context.Background(), cfgm.File(tmpFile))
+	manager := cfgm.New(Config{Name: "default-app"}, cfgm.WithoutDefaultPaths())
+	cfg, err := manager.Load(context.Background(), cfgm.File(tmpFile))
 	if err != nil {
 		fmt.Println("加载失败:", err)
 

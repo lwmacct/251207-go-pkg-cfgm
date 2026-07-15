@@ -18,10 +18,10 @@ func defaultConfig() config {
 	return config{Name: "example", Timeout: 30 * time.Second}
 }
 
-var definition = cfgm.New(defaultConfig(), cfgm.WithoutDefaultPaths())
+var manager = cfgm.New(defaultConfig(), cfgm.WithoutDefaultPaths())
 
 func main() {
-	loaded, err := definition.Load(context.Background(), cfgm.File("examples/config-files/config.yaml"))
+	loaded, err := manager.Load(context.Background(), cfgm.File("examples/config-files/config.yaml"))
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

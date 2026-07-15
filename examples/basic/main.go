@@ -18,9 +18,9 @@ func main() {
 	var defaults config
 	defaults.Endpoint = "https://api.example.com"
 	defaults.Timeout = 30 * time.Second
-	definition := cfgm.New(defaults, cfgm.WithoutDefaultPaths())
+	manager := cfgm.New(defaults, cfgm.WithoutDefaultPaths())
 
-	loaded, err := definition.Load(
+	loaded, err := manager.Load(
 		context.Background(),
 		cfgm.File("examples/basic/config.yaml"),
 		cfgm.Env("APP_"),

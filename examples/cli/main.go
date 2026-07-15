@@ -31,31 +31,27 @@ func defaultConfig() config {
 }
 
 func main() {
-	definition := cfgm.New(defaultConfig(), cfgm.AppName("cfgm-example"))
-	binding := definition.Bind(
-		cfgm.Command("server"),
-		cfgm.Alias("addr", "a"),
-		cfgm.NoCLI("redis.password"),
+	manager := cfgm.New(
+		defaultConfig(),
+		cfgm.AppName("cfgm-example"),
+		cfgm.CLIAlias("server.addr", "a"),
+		cfgm.HideCLI("server.redis.password"),
 	)
 
-	app := &cli.Command{
-		Name:  "cfgm-example",
-		Usage: "cfgm CLI flag generation example",
-		Flags: cfgm.RootFlags(),
-		Commands: []*cli.Command{{
-			Name:  "server",
-			Usage: "load and print server configuration",
-			Flags: binding.Flags(),
-			Action: func(ctx context.Context, cmd *cli.Command) error {
-				loaded, err := binding.Load(ctx, cmd)
-				if err != nil {
-					return err
-				}
-				_, _ = fmt.Fprintf(os.Stdout, "%s", cfgm.MarshalYAML(loaded))
-				return nil
-			},
-		}},
+	server := &cli.Command{
+		Name:  "server",
+		Usage: "load and print server configuration",
+		Action: manager.Action(func(_ context.Context, _ *cli.Command, loaded *config) error {
+			_, _ = fmt.Fprintf(os.Stdout, "%s", cfgm.MarshalYAML(loaded))
+			return nil
+		}),
 	}
+	app := &cli.Command{
+		Name:     "cfgm-example",
+		Usage:    "cfgm CLI flag generation example",
+		Commands: []*cli.Command{server},
+	}
+	manager.MustConfigure(app)
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)

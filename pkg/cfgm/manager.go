@@ -17,54 +17,57 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-type DefinitionOption interface {
-	applyDefinition(options *definitionOptions)
+// Option configures a Manager.
+type Option interface {
+	applyManager(options *managerOptions)
 }
 
-type definitionOptionFunc func(*definitionOptions)
+type managerOptionFunc func(*managerOptions)
 
-func (f definitionOptionFunc) applyDefinition(options *definitionOptions) {
+func (f managerOptionFunc) applyManager(options *managerOptions) {
 	f(options)
 }
 
-type definitionOptions struct {
+type managerOptions struct {
 	appName          string
 	codecs           map[reflect.Type]valueCodec
 	defaultPaths     bool
 	expandTemplates  bool
 	allowUnknownKeys bool
 	logger           *slog.Logger
+	aliases          map[string][]string
+	noCLI            map[string]bool
 }
 
-func AppName(name string) DefinitionOption {
-	return definitionOptionFunc(func(options *definitionOptions) {
+func AppName(name string) Option {
+	return managerOptionFunc(func(options *managerOptions) {
 		options.appName = strings.TrimSpace(name)
 	})
 }
 
-func WithoutDefaultPaths() DefinitionOption {
-	return definitionOptionFunc(func(options *definitionOptions) {
+func WithoutDefaultPaths() Option {
+	return managerOptionFunc(func(options *managerOptions) {
 		options.defaultPaths = false
 	})
 }
 
-func WithoutTemplateExpansion() DefinitionOption {
-	return definitionOptionFunc(func(options *definitionOptions) {
+func WithoutTemplateExpansion() Option {
+	return managerOptionFunc(func(options *managerOptions) {
 		options.expandTemplates = false
 	})
 }
 
-func AllowUnknownKeys() DefinitionOption {
-	return definitionOptionFunc(func(options *definitionOptions) {
+func AllowUnknownKeys() Option {
+	return managerOptionFunc(func(options *managerOptions) {
 		options.allowUnknownKeys = true
 	})
 }
 
-func Logger(logger *slog.Logger) DefinitionOption {
+func Logger(logger *slog.Logger) Option {
 	if logger == nil {
 		panic("cfgm: logger must not be nil")
 	}
-	return definitionOptionFunc(func(options *definitionOptions) {
+	return managerOptionFunc(func(options *managerOptions) {
 		options.logger = logger
 	})
 }
@@ -74,11 +77,11 @@ type Codec[T any] struct {
 	Format func(T) string
 }
 
-func WithCodec[T any](codec Codec[T]) DefinitionOption {
+func WithCodec[T any](codec Codec[T]) Option {
 	if codec.Parse == nil {
 		panic(fmt.Sprintf("cfgm: codec for %s requires Parse", reflect.TypeFor[T]()))
 	}
-	return definitionOptionFunc(func(options *definitionOptions) {
+	return managerOptionFunc(func(options *managerOptions) {
 		if options.codecs == nil {
 			options.codecs = make(map[reflect.Type]valueCodec)
 		}
@@ -99,119 +102,24 @@ func WithCodec[T any](codec Codec[T]) DefinitionOption {
 	})
 }
 
-type valueCodec struct {
-	parse  func(string) (any, error)
-	format func(any) string
-}
-
-type Definition[T any] struct {
-	defaults          T
-	appName           string
-	schema            *schemaModel
-	codecs            map[reflect.Type]valueCodec
-	defaultPaths      bool
-	expandTemplates   bool
-	strictUnknownKeys bool
-	logger            *slog.Logger
-}
-
-func New[T any](defaults T, opts ...DefinitionOption) *Definition[T] {
-	options := definitionOptions{defaultPaths: true, expandTemplates: true, logger: slog.Default()}
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyDefinition(&options)
+// HideCLI excludes canonical config field or struct paths from generated CLI
+// flags. Files and environment variables can still configure these paths.
+func HideCLI(paths ...string) Option {
+	return managerOptionFunc(func(options *managerOptions) {
+		if options.noCLI == nil {
+			options.noCLI = make(map[string]bool)
 		}
-	}
-	return &Definition[T]{
-		defaults:          defaults,
-		appName:           options.appName,
-		schema:            buildSchemaModel(reflect.TypeFor[T](), options.codecs),
-		codecs:            mapsClone(options.codecs),
-		defaultPaths:      options.defaultPaths,
-		expandTemplates:   options.expandTemplates,
-		strictUnknownKeys: !options.allowUnknownKeys,
-		logger:            options.logger,
-	}
-}
-
-func (d *Definition[T]) Load(ctx context.Context, sources ...Source) (*T, error) {
-	config, _, err := d.LoadReport(ctx, sources...)
-	return config, err
-}
-
-func (d *Definition[T]) MustLoad(ctx context.Context, sources ...Source) *T {
-	config, err := d.Load(ctx, sources...)
-	if err != nil {
-		panic(fmt.Sprintf("cfgm: failed to load config: %v", err))
-	}
-	return config
-}
-
-func (d *Definition[T]) LoadReport(ctx context.Context, sources ...Source) (*T, *Report, error) {
-	loader := d.loader()
-	if d.defaultPaths {
-		loader.sources = append(loader.sources, Files(DefaultPaths(d.appName), Optional()))
-	}
-	loader.sources = append(loader.sources, sources...)
-	return loader.load(ctx)
-}
-
-func (d *Definition[T]) loader() *configLoader[T] {
-	return &configLoader[T]{
-		defaults:          d.defaults,
-		schema:            d.schema,
-		logger:            d.logger,
-		expandDefaults:    d.expandTemplates,
-		strictUnknownKeys: d.strictUnknownKeys,
-		codecs:            d.codecs,
-	}
-}
-
-// BindOption configures command-path projection and generated CLI flags.
-type BindOption interface {
-	applyBinding(options *bindingOptions)
-}
-
-type bindingOptionFunc func(*bindingOptions)
-
-func (f bindingOptionFunc) applyBinding(options *bindingOptions) {
-	f(options)
-}
-
-type bindingOptions struct {
-	commandPath string
-	commandSet  bool
-	aliases     map[string][]string
-	noCLI       map[string]bool
-}
-
-// Command binds CLI fields to the configuration subtree selected by the
-// command lineage. Each name represents one CLI command level and must match
-// the corresponding json-tagged configuration struct field.
-func Command(names ...string) BindOption {
-	return bindingOptionFunc(func(options *bindingOptions) {
-		if options.commandSet {
-			panic("cfgm: command path is already configured")
-		}
-		if len(names) == 0 {
-			panic("cfgm: command path requires at least one name")
-		}
-		cleaned := make([]string, len(names))
-		for index, name := range names {
-			name = strings.TrimSpace(name)
-			if name == "" || strings.Contains(name, ".") {
-				panic(fmt.Errorf("cfgm: invalid command name %q", name))
+		for _, path := range paths {
+			if path = cleanConfigPath(path); path != "" {
+				options.noCLI[path] = true
 			}
-			cleaned[index] = name
 		}
-		options.commandPath = strings.Join(cleaned, ".")
-		options.commandSet = true
 	})
 }
 
-// Alias adds CLI aliases for a field path relative to the bound command.
-func Alias(path string, aliases ...string) BindOption {
-	return bindingOptionFunc(func(options *bindingOptions) {
+// CLIAlias adds aliases to one canonical config field path.
+func CLIAlias(path string, aliases ...string) Option {
+	return managerOptionFunc(func(options *managerOptions) {
 		if options.aliases == nil {
 			options.aliases = make(map[string][]string)
 		}
@@ -224,26 +132,107 @@ func Alias(path string, aliases ...string) BindOption {
 	})
 }
 
-// NoCLI excludes field or struct paths relative to the bound command from CLI
-// flag generation. The fields remain available to files and environment
-// variables.
-func NoCLI(paths ...string) BindOption {
-	return bindingOptionFunc(func(options *bindingOptions) {
-		if options.noCLI == nil {
-			options.noCLI = make(map[string]bool)
-		}
-		for _, path := range paths {
-			if path = cleanConfigPath(path); path != "" {
-				options.noCLI[path] = true
-			}
-		}
-	})
+type valueCodec struct {
+	parse  func(string) (any, error)
+	format func(any) string
 }
 
-type Binding[T any] struct {
-	definition  *Definition[T]
+// Manager compiles one config schema and owns all file, environment, CLI, and
+// example behavior for that config type.
+type Manager[T any] struct {
+	defaults          T
+	appName           string
+	schema            *schemaModel
+	codecs            map[reflect.Type]valueCodec
+	defaultPaths      bool
+	expandTemplates   bool
+	strictUnknownKeys bool
+	logger            *slog.Logger
+	aliases           map[string][]string
+	noCLI             map[string]bool
+	bindings          map[string]*commandBinding[T]
+	commands          map[*cli.Command]*commandBinding[T]
+	configured        bool
+}
+
+// New creates a Manager from non-pointer struct defaults.
+func New[T any](defaults T, opts ...Option) *Manager[T] {
+	options := managerOptions{defaultPaths: true, expandTemplates: true, logger: slog.Default()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyManager(&options)
+		}
+	}
+	manager := &Manager[T]{
+		defaults:          defaults,
+		appName:           options.appName,
+		schema:            buildSchemaModel(reflect.TypeFor[T](), options.codecs),
+		codecs:            mapsClone(options.codecs),
+		defaultPaths:      options.defaultPaths,
+		expandTemplates:   options.expandTemplates,
+		strictUnknownKeys: !options.allowUnknownKeys,
+		logger:            options.logger,
+		aliases:           mapsCloneSlices(options.aliases),
+		noCLI:             mapsClone(options.noCLI),
+		bindings:          make(map[string]*commandBinding[T]),
+		commands:          make(map[*cli.Command]*commandBinding[T]),
+	}
+	manager.validateCLIOptions()
+	return manager
+}
+
+// Load applies non-CLI sources after defaults and optional default paths.
+func (m *Manager[T]) Load(ctx context.Context, sources ...Source) (*T, error) {
+	config, _, err := m.LoadReport(ctx, sources...)
+	return config, err
+}
+
+// MustLoad is Load with panic-on-error startup semantics.
+func (m *Manager[T]) MustLoad(ctx context.Context, sources ...Source) *T {
+	config, err := m.Load(ctx, sources...)
+	if err != nil {
+		panic(fmt.Sprintf("cfgm: failed to load config: %v", err))
+	}
+	return config
+}
+
+// LoadReport loads config and reports the keys contributed by each source.
+func (m *Manager[T]) LoadReport(ctx context.Context, sources ...Source) (*T, *Report, error) {
+	loader := m.loader()
+	if m.defaultPaths {
+		loader.sources = append(loader.sources, Files(DefaultPaths(m.appName), Optional()))
+	}
+	loader.sources = append(loader.sources, sources...)
+	return loader.load(ctx)
+}
+
+func (m *Manager[T]) loader() *configLoader[T] {
+	return &configLoader[T]{
+		defaults:          m.defaults,
+		schema:            m.schema,
+		logger:            m.logger,
+		expandDefaults:    m.expandTemplates,
+		strictUnknownKeys: m.strictUnknownKeys,
+		codecs:            m.codecs,
+	}
+}
+
+// ActionFunc receives config loaded for the current CLI command lineage.
+type ActionFunc[T any] func(context.Context, *cli.Command, *T) error
+
+// ReportActionFunc also receives the CLI load report.
+type ReportActionFunc[T any] func(context.Context, *cli.Command, *T, *Report) error
+
+type commandBinding[T any] struct {
+	manager     *Manager[T]
 	commandPath string
 	fields      []boundField
+}
+
+type commandConfiguration[T any] struct {
+	command *cli.Command
+	binding *commandBinding[T]
+	flags   []cli.Flag
 }
 
 type boundField struct {
@@ -251,69 +240,63 @@ type boundField struct {
 	name  string
 }
 
-// Bind creates a typed CLI binding. Without Command it binds the config root;
-// with Command it binds only the matching config subtree and removes the
-// command path from generated flag names.
-func (d *Definition[T]) Bind(opts ...BindOption) *Binding[T] {
-	options := bindingOptions{}
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyBinding(&options)
+func (m *Manager[T]) validateCLIOptions() {
+	for path := range m.noCLI {
+		if !m.schema.isFieldPath(path) && !m.schema.isStructPath(path) {
+			panic(fmt.Errorf("cfgm: hidden CLI path %q does not select config fields", path))
 		}
 	}
-	d.validateBindingOptions(options)
+	for path, aliases := range m.aliases {
+		if !m.schema.isFieldPath(path) {
+			panic(fmt.Errorf("cfgm: CLI alias path %q is not a config field", path))
+		}
+		if bindingExcluded(path, m.noCLI) {
+			panic(fmt.Errorf("cfgm: CLI alias path %q is hidden", path))
+		}
+		seen := make(map[string]bool, len(aliases))
+		for _, alias := range aliases {
+			if isReservedFlagName(alias) {
+				panic(fmt.Errorf("cfgm: alias --%s is reserved", alias))
+			}
+			if seen[alias] {
+				panic(fmt.Errorf("cfgm: duplicate alias --%s for %s", alias, path))
+			}
+			seen[alias] = true
+		}
+	}
+}
 
-	fields := make([]boundField, 0, len(d.schema.fields))
+func (m *Manager[T]) newCommandBinding(commandPath string, rootOnly bool) (*commandBinding[T], error) {
+	if commandPath != "" && !m.schema.isStructPath(commandPath) {
+		return nil, fmt.Errorf("cfgm: command path %q is not a config struct path", commandPath)
+	}
+	fields := make([]boundField, 0, len(m.schema.fields))
 	seenNames := make(map[string]string)
-	for _, field := range d.schema.fields {
-		if options.commandSet && !pathWithin(field.path, options.commandPath) {
+	for _, field := range m.schema.fields {
+		if rootOnly && strings.Contains(field.path, ".") {
 			continue
 		}
-		if bindingExcluded(field.path, options.commandPath, options.noCLI) {
+		if commandPath != "" && !pathWithin(field.path, commandPath) {
 			continue
 		}
-		name := bindingFlagName(field.path, options.commandPath)
+		if bindingExcluded(field.path, m.noCLI) {
+			continue
+		}
+		name := bindingFlagName(field.path, commandPath)
 		if isReservedFlagName(name) {
-			panic(fmt.Errorf("cfgm: generated CLI flag --%s is reserved by root flags", name))
+			return nil, fmt.Errorf("cfgm: generated CLI flag --%s is reserved", name)
 		}
-		localPath := bindingLocalPath(field.path, options.commandPath)
-		field.aliases = append([]string(nil), options.aliases[localPath]...)
+		field.aliases = append([]string(nil), m.aliases[field.path]...)
 		for _, flagName := range append([]string{name}, field.aliases...) {
 			if previous, exists := seenNames[flagName]; exists {
-				panic(fmt.Errorf("cfgm: CLI flag --%s is ambiguous: matches %s and %s", flagName, previous, field.path))
+				return nil, fmt.Errorf("cfgm: CLI flag --%s is ambiguous: matches %s and %s", flagName, previous, field.path)
 			}
 			seenNames[flagName] = field.path
 		}
 		fields = append(fields, boundField{field: field, name: name})
 	}
 	slices.SortFunc(fields, func(a, b boundField) int { return strings.Compare(a.name, b.name) })
-	return &Binding[T]{definition: d, commandPath: options.commandPath, fields: fields}
-}
-
-func (d *Definition[T]) validateBindingOptions(options bindingOptions) {
-	if options.commandSet && !d.schema.isStructPath(options.commandPath) {
-		panic(fmt.Errorf("cfgm: command path %q is not a config struct path", options.commandPath))
-	}
-	for path := range options.noCLI {
-		configPath := bindingConfigPath(options.commandPath, path)
-		if !d.schema.isFieldPath(configPath) && !d.schema.isStructPath(configPath) {
-			panic(fmt.Errorf("cfgm: no-CLI path %q does not select CLI fields", path))
-		}
-	}
-	for path, aliases := range options.aliases {
-		configPath := bindingConfigPath(options.commandPath, path)
-		if !d.schema.isFieldPath(configPath) {
-			panic(fmt.Errorf("cfgm: alias path %q is not a CLI config field", path))
-		}
-		if bindingExcluded(configPath, options.commandPath, options.noCLI) {
-			panic(fmt.Errorf("cfgm: alias path %q is excluded from this binding", path))
-		}
-		for _, alias := range aliases {
-			if isReservedFlagName(alias) {
-				panic(fmt.Errorf("cfgm: alias --%s is reserved by root flags", alias))
-			}
-		}
-	}
+	return &commandBinding[T]{manager: m, commandPath: commandPath, fields: fields}, nil
 }
 
 func isReservedFlagName(name string) bool {
@@ -321,50 +304,183 @@ func isReservedFlagName(name string) bool {
 		name == "c" || name == "e" || name == "help" || name == "h"
 }
 
-func (b *Binding[T]) Flags() []cli.Flag {
+func (b *commandBinding[T]) flags() ([]cli.Flag, error) {
 	flags := make([]cli.Flag, 0, len(b.fields))
 	for _, field := range b.fields {
 		flag, err := b.newFlag(field)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		flags = append(flags, flag)
 	}
-	return flags
+	return flags, nil
 }
 
-func (b *Binding[T]) Load(ctx context.Context, cmd *cli.Command) (*T, error) {
-	config, _, err := b.LoadReport(ctx, cmd)
+// Configure adds root control flags and command-local config flags to a
+// completed urfave command tree. Call it before Command.Run.
+func (m *Manager[T]) Configure(root *cli.Command) error {
+	if root == nil {
+		return errors.New("cfgm: root command is nil")
+	}
+	if _, exists := m.commands[root]; exists {
+		return errors.New("cfgm: command tree is already configured")
+	}
+
+	newBindings := make(map[string]*commandBinding[T])
+	rootBinding, exists := m.bindings[""]
+	if !exists {
+		var err error
+		rootBinding, err = m.newCommandBinding("", true)
+		if err != nil {
+			return err
+		}
+		newBindings[""] = rootBinding
+	}
+	rootConfigFlags, err := rootBinding.flags()
+	if err != nil {
+		return err
+	}
+	mergedRootFlags, err := mergeCLIFlags(root.Flags, append(rootFlags(), rootConfigFlags...))
+	if err != nil {
+		return fmt.Errorf("cfgm: configure root command: %w", err)
+	}
+	configurations := []commandConfiguration[T]{{command: root, binding: rootBinding, flags: mergedRootFlags}}
+	seenPaths := make(map[string]bool)
+	for _, command := range root.Commands {
+		if err := m.compileCommand(command, "", seenPaths, newBindings, &configurations); err != nil {
+			return err
+		}
+	}
+	maps.Copy(m.bindings, newBindings)
+	for _, configuration := range configurations {
+		configuration.command.Flags = configuration.flags
+		m.commands[configuration.command] = configuration.binding
+	}
+	m.configured = true
+	return nil
+}
+
+func (m *Manager[T]) compileCommand(
+	command *cli.Command,
+	parentPath string,
+	seenPaths map[string]bool,
+	newBindings map[string]*commandBinding[T],
+	configurations *[]commandConfiguration[T],
+) error {
+	if command == nil {
+		return errors.New("cfgm: command tree contains nil command")
+	}
+	name := strings.TrimSpace(command.Name)
+	if name == "" || strings.Contains(name, ".") {
+		return fmt.Errorf("cfgm: invalid command name %q", name)
+	}
+	commandPath := joinSchemaPath(parentPath, name)
+	if seenPaths[commandPath] {
+		return fmt.Errorf("cfgm: duplicate command path %q", commandPath)
+	}
+	seenPaths[commandPath] = true
+	if command.Action != nil && m.schema.isStructPath(commandPath) {
+		configuration, err := m.compileActionCommand(command, commandPath, newBindings)
+		if err != nil {
+			return err
+		}
+		*configurations = append(*configurations, configuration)
+	}
+	for _, child := range command.Commands {
+		if err := m.compileCommand(child, commandPath, seenPaths, newBindings, configurations); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager[T]) compileActionCommand(
+	command *cli.Command,
+	commandPath string,
+	newBindings map[string]*commandBinding[T],
+) (commandConfiguration[T], error) {
+	binding, exists := m.bindings[commandPath]
+	if !exists {
+		binding, exists = newBindings[commandPath]
+	}
+	if !exists {
+		var err error
+		binding, err = m.newCommandBinding(commandPath, false)
+		if err != nil {
+			return commandConfiguration[T]{}, err
+		}
+		newBindings[commandPath] = binding
+	}
+	flags, err := binding.flags()
+	if err != nil {
+		return commandConfiguration[T]{}, err
+	}
+	mergedFlags, err := mergeCLIFlags(command.Flags, flags)
+	if err != nil {
+		return commandConfiguration[T]{}, fmt.Errorf("cfgm: configure command %q: %w", commandPath, err)
+	}
+	return commandConfiguration[T]{command: command, binding: binding, flags: mergedFlags}, nil
+}
+
+// MustConfigure is Configure with panic-on-error startup semantics.
+func (m *Manager[T]) MustConfigure(root *cli.Command) {
+	if err := m.Configure(root); err != nil {
+		panic(err)
+	}
+}
+
+// Action wraps a typed config callback as an urfave action.
+func (m *Manager[T]) Action(run ActionFunc[T]) cli.ActionFunc {
+	if run == nil {
+		panic("cfgm: action must not be nil")
+	}
+	return func(ctx context.Context, cmd *cli.Command) error {
+		config, err := m.loadCommand(ctx, cmd)
+		if err != nil {
+			return err
+		}
+		return run(ctx, cmd, config)
+	}
+}
+
+// ActionReport wraps a typed config and load-report callback as an urfave action.
+func (m *Manager[T]) ActionReport(run ReportActionFunc[T]) cli.ActionFunc {
+	if run == nil {
+		panic("cfgm: report action must not be nil")
+	}
+	return func(ctx context.Context, cmd *cli.Command) error {
+		config, report, err := m.loadCommandReport(ctx, cmd)
+		if err != nil {
+			return err
+		}
+		return run(ctx, cmd, config, report)
+	}
+}
+
+func (m *Manager[T]) loadCommand(ctx context.Context, cmd *cli.Command) (*T, error) {
+	config, _, err := m.loadCommandReport(ctx, cmd)
 	return config, err
 }
 
-func (b *Binding[T]) MustLoad(ctx context.Context, cmd *cli.Command) *T {
-	config, err := b.Load(ctx, cmd)
-	if err != nil {
-		panic(fmt.Sprintf("cfgm: failed to load config: %v", err))
-	}
-	return config
-}
-
-func (b *Binding[T]) LoadReport(ctx context.Context, cmd *cli.Command) (*T, *Report, error) {
+func (m *Manager[T]) loadCommandReport(ctx context.Context, cmd *cli.Command) (*T, *Report, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("cfgm: nil context")
 	}
-	actualCommandPath := commandLineagePath(cmd)
-	if actualCommandPath != b.commandPath {
-		return nil, nil, fmt.Errorf(
-			"cfgm: binding command path %q does not match CLI command path %q",
-			b.commandPath,
-			actualCommandPath,
-		)
+	if !m.configured {
+		return nil, nil, errors.New("cfgm: manager must be configured before running CLI actions")
 	}
-	loader := b.definition.loader()
+	commandPath := commandLineagePath(cmd)
+	binding, exists := m.commands[cmd]
+	if !exists {
+		return nil, nil, fmt.Errorf("cfgm: command path %q was not configured by this manager", commandPath)
+	}
+	loader := m.loader()
 
-	appName := b.definition.appName
+	appName := m.appName
 	if appName == "" {
 		appName = commandRootName(cmd)
 	}
-	if b.definition.defaultPaths {
+	if m.defaultPaths {
 		loader.sources = append(loader.sources, Files(DefaultPaths(appName), Optional()))
 	}
 	if configPath := commandConfigPath(cmd); configPath != "" {
@@ -377,20 +493,20 @@ func (b *Binding[T]) LoadReport(ctx context.Context, cmd *cli.Command) (*T, *Rep
 	} else if appName != "" {
 		loader.sources = append(loader.sources, Env(strings.ToUpper(strings.ReplaceAll(appName, "-", "_"))+"_"))
 	}
-	loader.sources = append(loader.sources, &bindingCLISource[T]{binding: b, cmd: cmd})
+	loader.sources = append(loader.sources, &bindingCLISource[T]{binding: binding, cmd: cmd})
 	return loader.load(ctx)
 }
 
-func (b *Binding[T]) newFlag(bound boundField) (cli.Flag, error) {
+func (b *commandBinding[T]) newFlag(bound boundField) (cli.Flag, error) {
 	field := bound.field
 	aliases := append([]string(nil), field.aliases...)
 	usage := field.desc
-	defaultValue, ok := valueAtPath(reflect.ValueOf(b.definition.defaults), field.index)
+	defaultValue, ok := valueAtPath(reflect.ValueOf(b.manager.defaults), field.index)
 	if !ok {
 		defaultValue = reflect.Zero(field.typ)
 	}
 
-	if codec, ok := b.definition.codecs[field.typ]; ok {
+	if codec, ok := b.manager.codecs[field.typ]; ok {
 		value := ""
 		if defaultValue.IsValid() {
 			value = codec.format(defaultValue.Interface())
@@ -454,7 +570,7 @@ func (b *Binding[T]) newFlag(bound boundField) (cli.Flag, error) {
 	return nil, fmt.Errorf("cfgm: config field %s has unsupported CLI type %s", field.path, field.typ)
 }
 
-func (b *Binding[T]) newStructSliceFlag(bound boundField, defaultValue reflect.Value) cli.Flag {
+func (b *commandBinding[T]) newStructSliceFlag(bound boundField, defaultValue reflect.Value) cli.Flag {
 	defaultText := "[]"
 	if defaultValue.IsValid() {
 		encoded, err := json.Marshal(defaultValue.Interface())
@@ -467,7 +583,7 @@ func (b *Binding[T]) newStructSliceFlag(bound boundField, defaultValue reflect.V
 		Aliases:     append([]string(nil), bound.field.aliases...),
 		Usage:       bound.field.desc,
 		DefaultText: defaultText,
-		Value:       newStructSliceValue(bound.field.typ, b.definition.codecs),
+		Value:       newStructSliceValue(bound.field.typ, b.manager.codecs),
 	}
 }
 
@@ -533,7 +649,7 @@ func stringMapAs(value any) map[string]string {
 }
 
 type bindingCLISource[T any] struct {
-	binding *Binding[T]
+	binding *commandBinding[T]
 	cmd     *cli.Command
 }
 
@@ -560,7 +676,7 @@ func (s *bindingCLISource[T]) Load(ctx context.Context, _ Schema) (map[string]an
 	return out, nil
 }
 
-func (b *Binding[T]) flagValue(cmd *cli.Command, bound boundField) (any, error) {
+func (b *commandBinding[T]) flagValue(cmd *cli.Command, bound boundField) (any, error) {
 	if bound.field.kind == schemaFieldStructSlice {
 		value, ok := cmd.Value(bound.name).(*structSliceValue)
 		if !ok || value == nil {
@@ -568,7 +684,7 @@ func (b *Binding[T]) flagValue(cmd *cli.Command, bound boundField) (any, error) 
 		}
 		return value.configValue(), nil
 	}
-	if _, ok := b.definition.codecs[bound.field.typ]; ok {
+	if _, ok := b.manager.codecs[bound.field.typ]; ok {
 		return cmd.String(bound.name), nil
 	}
 	if bound.field.typ.Kind() == reflect.Slice {
@@ -1039,9 +1155,9 @@ func cleanConfigPath(path string) string {
 	return strings.Trim(strings.TrimSpace(path), ".")
 }
 
-func bindingExcluded(path, commandPath string, exclusions map[string]bool) bool {
+func bindingExcluded(path string, exclusions map[string]bool) bool {
 	for exclusion := range exclusions {
-		if pathWithin(path, bindingConfigPath(commandPath, exclusion)) {
+		if pathWithin(path, exclusion) {
 			return true
 		}
 	}
@@ -1059,14 +1175,6 @@ func bindingFlagName(path, commandPath string) string {
 		}
 	}
 	return path
-}
-
-func bindingLocalPath(path, commandPath string) string {
-	return bindingFlagName(path, commandPath)
-}
-
-func bindingConfigPath(commandPath, localPath string) string {
-	return joinSchemaPath(commandPath, localPath)
 }
 
 func joinSchemaPath(prefix, key string) string {
@@ -1161,5 +1269,16 @@ func mapsClone[K comparable, V any](source map[K]V) map[K]V {
 	}
 	out := make(map[K]V, len(source))
 	maps.Copy(out, source)
+	return out
+}
+
+func mapsCloneSlices[K comparable, V any](source map[K][]V) map[K][]V {
+	if source == nil {
+		return nil
+	}
+	out := make(map[K][]V, len(source))
+	for key, values := range source {
+		out[key] = append([]V(nil), values...)
+	}
 	return out
 }
