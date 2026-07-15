@@ -25,7 +25,7 @@ type config struct {
 
 func main() {
 	definition := cfgm.New(config{}, cfgm.AppName("composite"), cfgm.WithoutDefaultPaths())
-	binding := definition.Bind(cfgm.Scope("server"))
+	binding := definition.Bind(cfgm.Command("server"))
 	app := &cli.Command{
 		Name:  "composite",
 		Flags: cfgm.RootFlags(),

@@ -36,11 +36,11 @@ type bindingTestConfig struct {
 		Tags         []string                `json:"tags"         desc:"标签"`
 		Certificates []bindingTLSCertificate `json:"certificates" desc:"证书列表"`
 		Routes       []bindingRoute          `json:"routes"       desc:"路由列表"`
+		Redis        struct {
+			URL      string `json:"url"      desc:"Redis URL"`
+			Password string `json:"password" desc:"Redis 密码"`
+		} `json:"redis" desc:"Redis 配置"`
 	} `json:"server" desc:"服务端配置"`
-	Redis struct {
-		URL      string `json:"url"      desc:"Redis URL"`
-		Password string `json:"password" desc:"Redis 密码"`
-	} `json:"redis" desc:"Redis 配置"`
 }
 
 func bindingDefaults() bindingTestConfig {
@@ -54,16 +54,15 @@ func bindingDefaults() bindingTestConfig {
 		PrivateKey:  "file:///default.key",
 		Refresh:     time.Minute,
 	}}
-	cfg.Redis.URL = "redis://localhost:6379"
+	cfg.Server.Redis.URL = "redis://localhost:6379"
 	return cfg
 }
 
 func TestBindingGeneratesTypedFlags(t *testing.T) {
 	definition := New(bindingDefaults(), AppName("testapp"))
 	binding := definition.Bind(
-		Scope("server"),
-		Include("redis"),
-		Alias("server.addr", "a"),
+		Command("server"),
+		Alias("addr", "a"),
 		NoCLI("redis.password"),
 	)
 
@@ -84,18 +83,62 @@ func TestBindingGeneratesTypedFlags(t *testing.T) {
 	assert.Nil(t, findFlag(flags, "redis.password"))
 }
 
+func TestBindingTrimsNestedCommandPath(t *testing.T) {
+	definition := New(bindingDefaults(), WithoutDefaultPaths())
+	binding := definition.Bind(Command("server", "redis"), NoCLI("password"))
+	requireFlagType[*cli.StringFlag](t, binding.Flags(), "url")
+	assert.Nil(t, findFlag(binding.Flags(), "password"))
+
+	var loaded *bindingTestConfig
+	root := &cli.Command{
+		Name: "app",
+		Commands: []*cli.Command{{
+			Name: "server",
+			Commands: []*cli.Command{{
+				Name:  "redis",
+				Flags: binding.Flags(),
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					var err error
+					loaded, err = binding.Load(ctx, cmd)
+					return err
+				},
+			}},
+		}},
+	}
+
+	err := root.Run(t.Context(), []string{"app", "server", "redis", "--url=redis://nested:6379"})
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, "redis://nested:6379", loaded.Server.Redis.URL)
+}
+
+func TestBindingRejectsMismatchedCommandLineage(t *testing.T) {
+	definition := New(bindingDefaults(), WithoutDefaultPaths())
+	binding := definition.Bind(Command("server"))
+	cmd := &cli.Command{
+		Name:  "app",
+		Flags: binding.Flags(),
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			_, err := binding.Load(ctx, cmd)
+			return err
+		},
+	}
+	err := cmd.Run(t.Context(), []string{"app"})
+	require.ErrorContains(t, err, `binding command path "server" does not match CLI command path ""`)
+}
+
 func TestBindingLoadsSourcesInPriorityOrder(t *testing.T) {
 	definition := New(bindingDefaults(), AppName("testapp"))
-	binding := definition.Bind(Scope("server"), Include("redis"), NoCLI("redis.password"))
+	binding := definition.Bind(Command("server"), NoCLI("redis.password"))
 	configPath := writeTempConfig(t, `
 server:
   addr: ":8000"
   workers: 3
-redis:
-  url: "redis://file:6379"
+  redis:
+    url: "redis://file:6379"
 `)
 	t.Setenv("TESTAPP_SERVER_ADDR", ":8100")
-	t.Setenv("TESTAPP_REDIS_URL", "redis://env:6379")
+	t.Setenv("TESTAPP_SERVER_REDIS_URL", "redis://env:6379")
 
 	var loaded *bindingTestConfig
 	root := &cli.Command{
@@ -121,12 +164,12 @@ redis:
 	require.NotNil(t, loaded)
 	assert.Equal(t, ":8200", loaded.Server.Addr)
 	assert.Equal(t, 4, loaded.Server.Workers)
-	assert.Equal(t, "redis://env:6379", loaded.Redis.URL)
+	assert.Equal(t, "redis://env:6379", loaded.Server.Redis.URL)
 }
 
 func TestBindingLoadsRepeatedStructValues(t *testing.T) {
 	definition := New(bindingDefaults())
-	binding := definition.Bind(Scope("server"))
+	binding := definition.Bind(Command("server"))
 	loaded, err := runBinding(t, binding,
 		`--certificates={"id":"main","certificate":"op://cert/main","private-key":"op://key/main","refresh":"30s"}`,
 		`--certificates={"id":"api","certificate":"op://cert/api","private-key":"op://key/api","refresh":"1m"}`,
@@ -141,7 +184,7 @@ func TestBindingLoadsRepeatedStructValues(t *testing.T) {
 
 func TestBindingStructValuesReplaceLowerPrioritySources(t *testing.T) {
 	definition := New(bindingDefaults())
-	binding := definition.Bind(Scope("server"))
+	binding := definition.Bind(Command("server"))
 	loaded, err := runBinding(t, binding,
 		`--certificates={"id":"only","certificate":"file:///only.crt","private-key":"file:///only.key"}`,
 	)
@@ -152,7 +195,7 @@ func TestBindingStructValuesReplaceLowerPrioritySources(t *testing.T) {
 
 func TestBindingStructValuesCanBeCleared(t *testing.T) {
 	definition := New(bindingDefaults())
-	binding := definition.Bind(Scope("server"))
+	binding := definition.Bind(Command("server"))
 	loaded, err := runBinding(t, binding, `--certificates=[]`)
 	require.NoError(t, err)
 	assert.Empty(t, loaded.Server.Certificates)
@@ -160,7 +203,7 @@ func TestBindingStructValuesCanBeCleared(t *testing.T) {
 
 func TestBindingScalarCollectionsReplaceDefaults(t *testing.T) {
 	definition := New(bindingDefaults())
-	binding := definition.Bind(Scope("server"))
+	binding := definition.Bind(Command("server"))
 	loaded, err := runBinding(t, binding, `--tags=cli`)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"cli"}, loaded.Server.Tags)
@@ -168,7 +211,7 @@ func TestBindingScalarCollectionsReplaceDefaults(t *testing.T) {
 
 func TestBindingRejectsInvalidStructValues(t *testing.T) {
 	definition := New(bindingDefaults())
-	binding := definition.Bind(Scope("server"))
+	binding := definition.Bind(Command("server"))
 	tests := []struct {
 		name string
 		args []string
@@ -221,7 +264,7 @@ func TestBindingUsesRegisteredCodec(t *testing.T) {
 
 func TestBindingRejectsUnknownFileFieldsInsideStructSlices(t *testing.T) {
 	definition := New(bindingDefaults())
-	binding := definition.Bind(Scope("server"))
+	binding := definition.Bind(Command("server"))
 	configPath := writeTempConfig(t, `
 server:
   certificates:
@@ -291,7 +334,7 @@ routes:
 
 func TestBindingRejectsDeepUnknownStructFlagFields(t *testing.T) {
 	definition := New(bindingDefaults())
-	binding := definition.Bind(Scope("server"))
+	binding := definition.Bind(Command("server"))
 	_, err := runBinding(t, binding,
 		`--routes={"path":"/api","backends":[{"url":"https://api.example.com","typo":true}]}`,
 	)
@@ -454,15 +497,19 @@ func TestBindingRejectsInvalidPathsAndAliases(t *testing.T) {
 		bind func()
 		want string
 	}{
-		{name: "scope", bind: func() { definition.Bind(Scope("missing")) }, want: "scope"},
-		{name: "include", bind: func() { definition.Bind(Include("missing")) }, want: "include"},
-		{name: "no CLI", bind: func() { definition.Bind(NoCLI("missing")) }, want: "no-CLI"},
-		{name: "alias path", bind: func() { definition.Bind(Alias("missing", "m")) }, want: "alias path"},
-		{name: "excluded alias", bind: func() { definition.Bind(Scope("server"), Alias("redis.url", "r")) }, want: "excluded"},
-		{name: "reserved alias", bind: func() { definition.Bind(Alias("server.addr", "c")) }, want: "reserved"},
-		{name: "help alias", bind: func() { definition.Bind(Alias("server.addr", "h")) }, want: "reserved"},
+		{name: "command", bind: func() { definition.Bind(Command("missing")) }, want: "command path"},
+		{name: "empty command", bind: func() { definition.Bind(Command()) }, want: "requires"},
+		{name: "invalid command", bind: func() { definition.Bind(Command("server.child")) }, want: "invalid command"},
+		{name: "duplicate command", bind: func() { definition.Bind(Command("server"), Command("server")) }, want: "already"},
+		{name: "no CLI", bind: func() { definition.Bind(Command("server"), NoCLI("missing")) }, want: "no-CLI"},
+		{name: "alias path", bind: func() { definition.Bind(Command("server"), Alias("missing", "m")) }, want: "alias path"},
+		{name: "excluded alias", bind: func() {
+			definition.Bind(Command("server"), NoCLI("redis"), Alias("redis.url", "r"))
+		}, want: "excluded"},
+		{name: "reserved alias", bind: func() { definition.Bind(Command("server"), Alias("addr", "c")) }, want: "reserved"},
+		{name: "help alias", bind: func() { definition.Bind(Command("server"), Alias("addr", "h")) }, want: "reserved"},
 		{name: "alias collision", bind: func() {
-			definition.Bind(Alias("server.addr", "x"), Alias("server.debug", "x"))
+			definition.Bind(Command("server"), Alias("addr", "x"), Alias("debug", "x"))
 		}, want: "ambiguous"},
 	}
 	for _, test := range tests {

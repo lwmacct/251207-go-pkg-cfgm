@@ -35,12 +35,12 @@ go get github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm
 ```go
 type Config struct {
     Server ServerConfig `json:"server" desc:"服务端配置"`
-    Redis  RedisConfig  `json:"redis"  desc:"Redis 配置"`
 }
 
 type ServerConfig struct {
     Addr    string        `json:"addr"    desc:"监听地址"`
     Timeout time.Duration `json:"timeout" desc:"请求超时"`
+    Redis   RedisConfig   `json:"redis"   desc:"Redis 配置"`
 }
 
 var Definition = cfgm.New(DefaultConfig(), cfgm.AppName("app"))
@@ -76,9 +76,8 @@ app := &cli.Command{
 
 ```go
 var serverBinding = Definition.Bind(
-    cfgm.Scope("server"),
-    cfgm.Include("redis"),
-    cfgm.Alias("server.addr", "a"),
+    cfgm.Command("server"),
+    cfgm.Alias("addr", "a"),
     cfgm.NoCLI("redis.password"),
 )
 
@@ -95,7 +94,7 @@ var serverCommand = &cli.Command{
 }
 ```
 
-`Scope("server")` 将 `server.addr` 暴露为 `--addr`；`Include("redis")` 额外暴露 `--redis.url` 等字段。不存在的路径、冲突 alias 和保留名称会在 `Bind` 时直接 panic，而不是运行到加载阶段才失败。
+`Command("server")` 要求配置根存在 `server` struct，并将其子树投影到 `server` 命令：`server.addr` 暴露为 `--addr`，`server.redis.url` 暴露为 `--redis.url`。`Alias` 和 `NoCLI` 使用相对于 `server` 的路径。嵌套命令使用 `Command("server", "worker")`，依次修剪配置层级。命令路径不存在、实际 urfave 命令链不匹配、alias 冲突或使用保留名称都会直接失败。
 
 CLI 加载优先级固定为：
 

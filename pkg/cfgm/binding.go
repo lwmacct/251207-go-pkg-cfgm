@@ -167,6 +167,7 @@ func (d *Definition[T]) loader() *configLoader[T] {
 	}
 }
 
+// BindOption configures command-path projection and generated CLI flags.
 type BindOption interface {
 	applyBinding(options *bindingOptions)
 }
@@ -178,28 +179,37 @@ func (f bindingOptionFunc) applyBinding(options *bindingOptions) {
 }
 
 type bindingOptions struct {
-	scope    string
-	includes []string
-	aliases  map[string][]string
-	noCLI    map[string]bool
+	commandPath string
+	commandSet  bool
+	aliases     map[string][]string
+	noCLI       map[string]bool
 }
 
-func Scope(path string) BindOption {
+// Command binds CLI fields to the configuration subtree selected by the
+// command lineage. Each name represents one CLI command level and must match
+// the corresponding json-tagged configuration struct field.
+func Command(names ...string) BindOption {
 	return bindingOptionFunc(func(options *bindingOptions) {
-		options.scope = cleanConfigPath(path)
-	})
-}
-
-func Include(paths ...string) BindOption {
-	return bindingOptionFunc(func(options *bindingOptions) {
-		for _, path := range paths {
-			if path = cleanConfigPath(path); path != "" {
-				options.includes = append(options.includes, path)
-			}
+		if options.commandSet {
+			panic("cfgm: command path is already configured")
 		}
+		if len(names) == 0 {
+			panic("cfgm: command path requires at least one name")
+		}
+		cleaned := make([]string, len(names))
+		for index, name := range names {
+			name = strings.TrimSpace(name)
+			if name == "" || strings.Contains(name, ".") {
+				panic(fmt.Errorf("cfgm: invalid command name %q", name))
+			}
+			cleaned[index] = name
+		}
+		options.commandPath = strings.Join(cleaned, ".")
+		options.commandSet = true
 	})
 }
 
+// Alias adds CLI aliases for a field path relative to the bound command.
 func Alias(path string, aliases ...string) BindOption {
 	return bindingOptionFunc(func(options *bindingOptions) {
 		if options.aliases == nil {
@@ -214,6 +224,9 @@ func Alias(path string, aliases ...string) BindOption {
 	})
 }
 
+// NoCLI excludes field or struct paths relative to the bound command from CLI
+// flag generation. The fields remain available to files and environment
+// variables.
 func NoCLI(paths ...string) BindOption {
 	return bindingOptionFunc(func(options *bindingOptions) {
 		if options.noCLI == nil {
@@ -228,9 +241,9 @@ func NoCLI(paths ...string) BindOption {
 }
 
 type Binding[T any] struct {
-	definition *Definition[T]
-	scope      string
-	fields     []boundField
+	definition  *Definition[T]
+	commandPath string
+	fields      []boundField
 }
 
 type boundField struct {
@@ -238,6 +251,9 @@ type boundField struct {
 	name  string
 }
 
+// Bind creates a typed CLI binding. Without Command it binds the config root;
+// with Command it binds only the matching config subtree and removes the
+// command path from generated flag names.
 func (d *Definition[T]) Bind(opts ...BindOption) *Binding[T] {
 	options := bindingOptions{}
 	for _, opt := range opts {
@@ -250,14 +266,18 @@ func (d *Definition[T]) Bind(opts ...BindOption) *Binding[T] {
 	fields := make([]boundField, 0, len(d.schema.fields))
 	seenNames := make(map[string]string)
 	for _, field := range d.schema.fields {
-		if bindingExcluded(field.path, options.noCLI) || !bindingIncludes(field.path, options.scope, options.includes) {
+		if options.commandSet && !pathWithin(field.path, options.commandPath) {
 			continue
 		}
-		name := bindingFlagName(field.path, options.scope)
+		if bindingExcluded(field.path, options.commandPath, options.noCLI) {
+			continue
+		}
+		name := bindingFlagName(field.path, options.commandPath)
 		if isReservedFlagName(name) {
 			panic(fmt.Errorf("cfgm: generated CLI flag --%s is reserved by root flags", name))
 		}
-		field.aliases = append([]string(nil), options.aliases[field.path]...)
+		localPath := bindingLocalPath(field.path, options.commandPath)
+		field.aliases = append([]string(nil), options.aliases[localPath]...)
 		for _, flagName := range append([]string{name}, field.aliases...) {
 			if previous, exists := seenNames[flagName]; exists {
 				panic(fmt.Errorf("cfgm: CLI flag --%s is ambiguous: matches %s and %s", flagName, previous, field.path))
@@ -267,28 +287,25 @@ func (d *Definition[T]) Bind(opts ...BindOption) *Binding[T] {
 		fields = append(fields, boundField{field: field, name: name})
 	}
 	slices.SortFunc(fields, func(a, b boundField) int { return strings.Compare(a.name, b.name) })
-	return &Binding[T]{definition: d, scope: options.scope, fields: fields}
+	return &Binding[T]{definition: d, commandPath: options.commandPath, fields: fields}
 }
 
 func (d *Definition[T]) validateBindingOptions(options bindingOptions) {
-	if options.scope != "" && !d.schema.isStructPath(options.scope) {
-		panic(fmt.Errorf("cfgm: scope %q is not a config struct path", options.scope))
-	}
-	for _, path := range options.includes {
-		if !d.schema.isFieldPath(path) && !d.schema.isStructPath(path) {
-			panic(fmt.Errorf("cfgm: include path %q does not select CLI fields", path))
-		}
+	if options.commandSet && !d.schema.isStructPath(options.commandPath) {
+		panic(fmt.Errorf("cfgm: command path %q is not a config struct path", options.commandPath))
 	}
 	for path := range options.noCLI {
-		if !d.schema.isFieldPath(path) && !d.schema.isStructPath(path) {
+		configPath := bindingConfigPath(options.commandPath, path)
+		if !d.schema.isFieldPath(configPath) && !d.schema.isStructPath(configPath) {
 			panic(fmt.Errorf("cfgm: no-CLI path %q does not select CLI fields", path))
 		}
 	}
 	for path, aliases := range options.aliases {
-		if !d.schema.isFieldPath(path) {
+		configPath := bindingConfigPath(options.commandPath, path)
+		if !d.schema.isFieldPath(configPath) {
 			panic(fmt.Errorf("cfgm: alias path %q is not a CLI config field", path))
 		}
-		if !bindingIncludes(path, options.scope, options.includes) || bindingExcluded(path, options.noCLI) {
+		if bindingExcluded(configPath, options.commandPath, options.noCLI) {
 			panic(fmt.Errorf("cfgm: alias path %q is excluded from this binding", path))
 		}
 		for _, alias := range aliases {
@@ -332,6 +349,14 @@ func (b *Binding[T]) MustLoad(ctx context.Context, cmd *cli.Command) *T {
 func (b *Binding[T]) LoadReport(ctx context.Context, cmd *cli.Command) (*T, *Report, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("cfgm: nil context")
+	}
+	actualCommandPath := commandLineagePath(cmd)
+	if actualCommandPath != b.commandPath {
+		return nil, nil, fmt.Errorf(
+			"cfgm: binding command path %q does not match CLI command path %q",
+			b.commandPath,
+			actualCommandPath,
+		)
 	}
 	loader := b.definition.loader()
 
@@ -1014,24 +1039,9 @@ func cleanConfigPath(path string) string {
 	return strings.Trim(strings.TrimSpace(path), ".")
 }
 
-func bindingIncludes(path, scope string, includes []string) bool {
-	if scope == "" && len(includes) == 0 {
-		return true
-	}
-	if pathWithin(path, scope) {
-		return true
-	}
-	for _, include := range includes {
-		if pathWithin(path, include) {
-			return true
-		}
-	}
-	return false
-}
-
-func bindingExcluded(path string, exclusions map[string]bool) bool {
+func bindingExcluded(path, commandPath string, exclusions map[string]bool) bool {
 	for exclusion := range exclusions {
-		if pathWithin(path, exclusion) {
+		if pathWithin(path, bindingConfigPath(commandPath, exclusion)) {
 			return true
 		}
 	}
@@ -1042,13 +1052,21 @@ func pathWithin(path, prefix string) bool {
 	return prefix != "" && (path == prefix || strings.HasPrefix(path, prefix+"."))
 }
 
-func bindingFlagName(path, scope string) string {
-	if scope != "" {
-		if name, ok := strings.CutPrefix(path, scope+"."); ok {
+func bindingFlagName(path, commandPath string) string {
+	if commandPath != "" {
+		if name, ok := strings.CutPrefix(path, commandPath+"."); ok {
 			return name
 		}
 	}
 	return path
+}
+
+func bindingLocalPath(path, commandPath string) string {
+	return bindingFlagName(path, commandPath)
+}
+
+func bindingConfigPath(commandPath, localPath string) string {
+	return joinSchemaPath(commandPath, localPath)
 }
 
 func joinSchemaPath(prefix, key string) string {

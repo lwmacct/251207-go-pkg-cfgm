@@ -23,7 +23,7 @@ func main() {
 	defaults.Server.Addr = ":7000"
 	defaults.Server.Timeout = 30 * time.Second
 	definition := cfgm.New(defaults, cfgm.AppName("precedence"), cfgm.WithoutDefaultPaths())
-	binding := definition.Bind(cfgm.Scope("server"))
+	binding := definition.Bind(cfgm.Command("server"))
 
 	app := &cli.Command{
 		Name:  "precedence",

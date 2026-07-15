@@ -51,3 +51,21 @@ func commandRootName(cmd *cli.Command) string {
 	}
 	return strings.TrimSpace(lineage[len(lineage)-1].Name)
 }
+
+func commandLineagePath(cmd *cli.Command) string {
+	if cmd == nil {
+		return ""
+	}
+	lineage := cmd.Lineage()
+	if len(lineage) <= 1 {
+		return ""
+	}
+	names := make([]string, 0, len(lineage)-1)
+	for index := len(lineage) - 2; index >= 0; index-- {
+		name := strings.TrimSpace(lineage[index].Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, ".")
+}

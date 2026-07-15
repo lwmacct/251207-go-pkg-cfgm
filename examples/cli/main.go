@@ -15,27 +15,26 @@ type config struct {
 	Server struct {
 		Addr    string        `json:"addr"    desc:"监听地址"`
 		Timeout time.Duration `json:"timeout" desc:"请求超时"`
+		Redis   struct {
+			URL      string `json:"url"      desc:"Redis URL"`
+			Password string `json:"password" desc:"Redis 密码"`
+		} `json:"redis" desc:"Redis 配置"`
 	} `json:"server" desc:"服务端配置"`
-	Redis struct {
-		URL      string `json:"url"      desc:"Redis URL"`
-		Password string `json:"password" desc:"Redis 密码"`
-	} `json:"redis" desc:"Redis 配置"`
 }
 
 func defaultConfig() config {
 	var defaults config
 	defaults.Server.Addr = ":8080"
 	defaults.Server.Timeout = 30 * time.Second
-	defaults.Redis.URL = "redis://localhost:6379/0"
+	defaults.Server.Redis.URL = "redis://localhost:6379/0"
 	return defaults
 }
 
 func main() {
 	definition := cfgm.New(defaultConfig(), cfgm.AppName("cfgm-example"))
 	binding := definition.Bind(
-		cfgm.Scope("server"),
-		cfgm.Include("redis"),
-		cfgm.Alias("server.addr", "a"),
+		cfgm.Command("server"),
+		cfgm.Alias("addr", "a"),
 		cfgm.NoCLI("redis.password"),
 	)
 

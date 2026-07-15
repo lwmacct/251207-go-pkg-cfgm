@@ -12,13 +12,12 @@
 //
 // # CLI Integration
 //
-// RootFlags returns the root --config/-c and --env-prefix/-e flags. Bind
-// selects config fields for one command and generates their typed flags:
+// RootFlags returns the root --config/-c and --env-prefix/-e flags. Command
+// declares the CLI command lineage whose matching config subtree Bind exposes:
 //
 //	binding := definition.Bind(
-//	    cfgm.Scope("server"),
-//	    cfgm.Include("redis"),
-//	    cfgm.Alias("server.addr", "a"),
+//	    cfgm.Command("server"),
+//	    cfgm.Alias("addr", "a"),
 //	    cfgm.NoCLI("redis.password"),
 //	)
 //
@@ -31,8 +30,11 @@
 //	    },
 //	}
 //
-// Binding.Load applies defaults, default paths, an explicit config file, the
-// selected environment prefix, and explicitly set CLI flags in that order.
+// Command paths map directly to json-tagged config structs. The example maps
+// Config.Server to the server command, so option paths are relative to server.
+// Binding.Load verifies the actual urfave command lineage and then applies
+// defaults, default paths, an explicit config file, the selected environment
+// prefix, and explicitly set CLI flags in that order.
 //
 // # Composite Values
 //
