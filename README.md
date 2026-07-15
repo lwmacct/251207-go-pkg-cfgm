@@ -16,48 +16,19 @@ go get github.com/lwmacct/251207-go-pkg-cfgm/pkg/cfgm
 
 ## 运行示例
 
-非 CLI 加载：
+完整索引和可复制命令见 [`examples/README.md`](examples/README.md)：
 
-```bash
-REDIS_URL=redis://localhost:6379/1 REDISCLI_AUTH=secret \
-  APP_ENDPOINT=https://localhost:8443 APP_TIMEOUT=5s \
-  go run ./examples/basic
-```
-
-示例会加载 [`examples/basic/config.yaml`](examples/basic/config.yaml)，文件内容如下：
-
-```yaml
-endpoint: "${APP_ENDPOINT:-https://api.example.com}"
-timeout: "${APP_TIMEOUT:-30s}"
-
-redis:
-  url: "${REDIS_URL:-redis://localhost:6379/0}"
-  password: "${REDISCLI_AUTH}"
-```
-
-加载时 cfgm 会先展开模板，再解析 YAML：
-
-```go
-loaded, err := definition.Load(ctx,
-    cfgm.File("examples/basic/config.yaml"),
-    cfgm.Env("APP_"),
-)
-```
-
-`${VAR}` 在变量不存在时展开为空字符串；`${VAR:-fallback}` 在变量不存在或为空时使用 fallback。示例只输出 `redis_password_set`，不会打印密码内容。
-
-自动生成 CLI flags：
-
-```bash
-go run ./examples/cli server --addr=:9090 --timeout=10s --tags=api
-```
-
-复合结构使用重复的 JSON object flags：
-
-```bash
-go run ./examples/cli server \
-  --certificates='{"id":"main","certificate":"file:///cert.pem","private-key":"file:///key.pem"}'
-```
+| 示例 | 能力 |
+| --- | --- |
+| [`basic`](examples/basic) | 默认值、文件、环境变量 |
+| [`cli`](examples/cli) | 自动生成 CLI flags 和 binding 投影 |
+| [`precedence`](examples/precedence) | 来源优先级和 `LoadReport` |
+| [`composite`](examples/composite) | slice、struct slice 和 JSON flags |
+| [`codec`](examples/codec) | 自定义叶子类型 codec |
+| [`validation`](examples/validation) | 严格校验与允许额外字段 |
+| [`templates`](examples/templates) | `${...}` 与模板策略 |
+| [`config-files`](examples/config-files) | 示例配置生成与运行配置校验 |
+| [`custom-source`](examples/custom-source) | 自定义配置来源 |
 
 ## 定义配置
 

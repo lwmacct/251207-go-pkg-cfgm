@@ -1,6 +1,2 @@
-endpoint: "${APP_ENDPOINT:-https://api.example.com}"
-timeout: "${APP_TIMEOUT:-30s}"
-
-redis:
-  url: "${REDIS_URL:-redis://localhost:6379/0}"
-  password: "${REDISCLI_AUTH}"
+endpoint: "https://api.example.com"
+timeout: 30s

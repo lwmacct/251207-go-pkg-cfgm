@@ -16,43 +16,30 @@ type config struct {
 		Addr    string        `json:"addr"    desc:"监听地址"`
 		Timeout time.Duration `json:"timeout" desc:"请求超时"`
 	} `json:"server" desc:"服务端配置"`
-	Redis struct {
-		URL      string `json:"url"      desc:"Redis URL"`
-		Password string `json:"password" desc:"Redis 密码"`
-	} `json:"redis" desc:"Redis 配置"`
-}
-
-func defaultConfig() config {
-	var defaults config
-	defaults.Server.Addr = ":8080"
-	defaults.Server.Timeout = 30 * time.Second
-	defaults.Redis.URL = "redis://localhost:6379/0"
-	return defaults
 }
 
 func main() {
-	definition := cfgm.New(defaultConfig(), cfgm.AppName("cfgm-example"))
-	binding := definition.Bind(
-		cfgm.Scope("server"),
-		cfgm.Include("redis"),
-		cfgm.Alias("server.addr", "a"),
-		cfgm.NoCLI("redis.password"),
-	)
+	var defaults config
+	defaults.Server.Addr = ":7000"
+	defaults.Server.Timeout = 30 * time.Second
+	definition := cfgm.New(defaults, cfgm.AppName("precedence"), cfgm.WithoutDefaultPaths())
+	binding := definition.Bind(cfgm.Scope("server"))
 
 	app := &cli.Command{
-		Name:  "cfgm-example",
-		Usage: "cfgm CLI flag generation example",
+		Name:  "precedence",
 		Flags: definition.Flags(),
 		Commands: []*cli.Command{{
 			Name:  "server",
-			Usage: "load and print server configuration",
 			Flags: binding.Flags(),
 			Action: func(ctx context.Context, cmd *cli.Command) error {
-				loaded, err := binding.Load(ctx, cmd)
+				loaded, report, err := binding.LoadReport(ctx, cmd)
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprintf(os.Stdout, "%s", cfgm.MarshalYAML(loaded))
+				_, _ = fmt.Fprintf(os.Stdout, "addr=%s timeout=%s\n", loaded.Server.Addr, loaded.Server.Timeout)
+				for _, source := range report.Sources {
+					_, _ = fmt.Fprintf(os.Stdout, "source=%s keys=%v\n", source.Name, source.Keys)
+				}
 				return nil
 			},
 		}},
