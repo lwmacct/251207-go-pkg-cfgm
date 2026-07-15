@@ -127,7 +127,7 @@ redis:
 func TestBindingLoadsRepeatedStructValues(t *testing.T) {
 	definition := New(bindingDefaults())
 	binding := definition.Bind(Scope("server"))
-	loaded, err := runBinding(t, definition, binding,
+	loaded, err := runBinding(t, binding,
 		`--certificates={"id":"main","certificate":"op://cert/main","private-key":"op://key/main","refresh":"30s"}`,
 		`--certificates={"id":"api","certificate":"op://cert/api","private-key":"op://key/api","refresh":"1m"}`,
 	)
@@ -142,7 +142,7 @@ func TestBindingLoadsRepeatedStructValues(t *testing.T) {
 func TestBindingStructValuesReplaceLowerPrioritySources(t *testing.T) {
 	definition := New(bindingDefaults())
 	binding := definition.Bind(Scope("server"))
-	loaded, err := runBinding(t, definition, binding,
+	loaded, err := runBinding(t, binding,
 		`--certificates={"id":"only","certificate":"file:///only.crt","private-key":"file:///only.key"}`,
 	)
 	require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestBindingStructValuesReplaceLowerPrioritySources(t *testing.T) {
 func TestBindingStructValuesCanBeCleared(t *testing.T) {
 	definition := New(bindingDefaults())
 	binding := definition.Bind(Scope("server"))
-	loaded, err := runBinding(t, definition, binding, `--certificates=[]`)
+	loaded, err := runBinding(t, binding, `--certificates=[]`)
 	require.NoError(t, err)
 	assert.Empty(t, loaded.Server.Certificates)
 }
@@ -161,7 +161,7 @@ func TestBindingStructValuesCanBeCleared(t *testing.T) {
 func TestBindingScalarCollectionsReplaceDefaults(t *testing.T) {
 	definition := New(bindingDefaults())
 	binding := definition.Bind(Scope("server"))
-	loaded, err := runBinding(t, definition, binding, `--tags=cli`)
+	loaded, err := runBinding(t, binding, `--tags=cli`)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"cli"}, loaded.Server.Tags)
 }
@@ -181,7 +181,7 @@ func TestBindingRejectsInvalidStructValues(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := runBinding(t, definition, binding, test.args...)
+			_, err := runBinding(t, binding, test.args...)
 			require.ErrorContains(t, err, test.want)
 		})
 	}
@@ -231,7 +231,7 @@ server:
       unknown: true
 `)
 
-	_, err := runBindingWithRootArgs(t, definition, binding, []string{"--config", configPath})
+	_, err := runBindingWithRootArgs(t, binding, []string{"--config", configPath})
 	require.ErrorContains(t, err, "unknown")
 }
 
@@ -292,7 +292,7 @@ routes:
 func TestBindingRejectsDeepUnknownStructFlagFields(t *testing.T) {
 	definition := New(bindingDefaults())
 	binding := definition.Bind(Scope("server"))
-	_, err := runBinding(t, definition, binding,
+	_, err := runBinding(t, binding,
 		`--routes={"path":"/api","backends":[{"url":"https://api.example.com","typo":true}]}`,
 	)
 	require.ErrorContains(t, err, "backends.typo")
@@ -527,17 +527,15 @@ func TestBindingSupportsNilCompositeDefaultsAndTimestamps(t *testing.T) {
 
 func runBinding(
 	t *testing.T,
-	definition *Definition[bindingTestConfig],
 	binding *Binding[bindingTestConfig],
 	args ...string,
 ) (*bindingTestConfig, error) {
 	t.Helper()
-	return runBindingWithRootArgs(t, definition, binding, nil, args...)
+	return runBindingWithRootArgs(t, binding, nil, args...)
 }
 
 func runBindingWithRootArgs(
 	t *testing.T,
-	definition *Definition[bindingTestConfig],
 	binding *Binding[bindingTestConfig],
 	rootArgs []string,
 	args ...string,
