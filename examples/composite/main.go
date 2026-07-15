@@ -28,7 +28,7 @@ func main() {
 	binding := definition.Bind(cfgm.Scope("server"))
 	app := &cli.Command{
 		Name:  "composite",
-		Flags: definition.Flags(),
+		Flags: cfgm.RootFlags(),
 		Commands: []*cli.Command{{
 			Name:  "server",
 			Flags: binding.Flags(),

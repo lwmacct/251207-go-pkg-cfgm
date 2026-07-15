@@ -25,7 +25,7 @@ APP_ENDPOINT=https://localhost:8443 APP_TIMEOUT=5s \
 
 ## CLI
 
-`Definition.Flags()` 生成根 `--config/-c` 和 `--env-prefix/-e`，`Binding.Flags()` 生成配置字段 flags：
+`cfgm.RootFlags()` 生成根 `--config/-c` 和 `--env-prefix/-e`，`Binding.Flags()` 生成配置字段 flags：
 
 ```bash
 go run ./examples/cli server \

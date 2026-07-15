@@ -52,7 +52,7 @@ func main() {
 	binding := definition.Bind()
 	app := &cli.Command{
 		Name:  "codec",
-		Flags: append(definition.Flags(), binding.Flags()...),
+		Flags: append(cfgm.RootFlags(), binding.Flags()...),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			loaded, err := binding.Load(ctx, cmd)
 			if err != nil {

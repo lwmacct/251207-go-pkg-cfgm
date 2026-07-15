@@ -42,7 +42,7 @@ func main() {
 	app := &cli.Command{
 		Name:  "cfgm-example",
 		Usage: "cfgm CLI flag generation example",
-		Flags: definition.Flags(),
+		Flags: cfgm.RootFlags(),
 		Commands: []*cli.Command{{
 			Name:  "server",
 			Usage: "load and print server configuration",

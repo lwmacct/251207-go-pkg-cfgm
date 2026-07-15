@@ -67,9 +67,11 @@ func TestBindingGeneratesTypedFlags(t *testing.T) {
 		NoCLI("redis.password"),
 	)
 
-	rootFlags := definition.Flags()
-	requireFlagType[*cli.StringFlag](t, rootFlags, "config")
-	requireFlagType[*cli.StringFlag](t, rootFlags, "env-prefix")
+	rootFlags := RootFlags()
+	configFlag := requireFlagType[*cli.StringFlag](t, rootFlags, "config")
+	assert.Equal(t, []string{"c"}, configFlag.Aliases)
+	envPrefixFlag := requireFlagType[*cli.StringFlag](t, rootFlags, "env-prefix")
+	assert.Equal(t, []string{"e"}, envPrefixFlag.Aliases)
 
 	flags := binding.Flags()
 	addr := requireFlagType[*cli.StringFlag](t, flags, "addr")
@@ -98,7 +100,7 @@ redis:
 	var loaded *bindingTestConfig
 	root := &cli.Command{
 		Name:  "testapp",
-		Flags: definition.Flags(),
+		Flags: RootFlags(),
 		Commands: []*cli.Command{{
 			Name:  "server",
 			Flags: binding.Flags(),
@@ -480,7 +482,7 @@ func TestBindingRejectsGeneratedReservedNames(t *testing.T) {
 		Config string `json:"config"`
 	}
 	definition := New(Config{})
-	assert.PanicsWithError(t, "cfgm: generated CLI flag --config is reserved by definition flags", func() {
+	assert.PanicsWithError(t, "cfgm: generated CLI flag --config is reserved by root flags", func() {
 		definition.Bind()
 	})
 }
@@ -544,7 +546,7 @@ func runBindingWithRootArgs(
 	var loaded *bindingTestConfig
 	root := &cli.Command{
 		Name:  "app",
-		Flags: definition.Flags(),
+		Flags: RootFlags(),
 		Commands: []*cli.Command{{
 			Name:  "server",
 			Flags: binding.Flags(),

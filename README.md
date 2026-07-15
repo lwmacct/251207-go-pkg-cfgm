@@ -63,12 +63,12 @@ config, err := Definition.Load(ctx,
 
 ## CLI 集成
 
-`Definition` 生成根命令的配置文件和环境前缀 flags：
+`RootFlags` 生成根命令的配置文件和环境前缀 flags：
 
 ```go
 app := &cli.Command{
     Name:  "app",
-    Flags: Definition.Flags(), // --config/-c, --env-prefix/-e
+    Flags: cfgm.RootFlags(), // --config/-c, --env-prefix/-e
 }
 ```
 

@@ -27,7 +27,7 @@ func main() {
 
 	app := &cli.Command{
 		Name:  "precedence",
-		Flags: definition.Flags(),
+		Flags: cfgm.RootFlags(),
 		Commands: []*cli.Command{{
 			Name:  "server",
 			Flags: binding.Flags(),

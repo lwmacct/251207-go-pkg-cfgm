@@ -12,8 +12,8 @@
 //
 // # CLI Integration
 //
-// Definition.Flags returns the root --config/-c and --env-prefix/-e flags.
-// Bind selects config fields for one command and generates their typed flags:
+// RootFlags returns the root --config/-c and --env-prefix/-e flags. Bind
+// selects config fields for one command and generates their typed flags:
 //
 //	binding := definition.Bind(
 //	    cfgm.Scope("server"),

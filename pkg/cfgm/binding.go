@@ -167,13 +167,6 @@ func (d *Definition[T]) loader() *configLoader[T] {
 	}
 }
 
-func (d *Definition[T]) Flags() []cli.Flag {
-	return []cli.Flag{
-		&cli.StringFlag{Name: configFlagName, Aliases: []string{"c"}, Usage: "配置文件路径"},
-		&cli.StringFlag{Name: envPrefixFlagName, Aliases: []string{"e"}, Usage: "环境变量前缀"},
-	}
-}
-
 type BindOption interface {
 	applyBinding(options *bindingOptions)
 }
@@ -262,7 +255,7 @@ func (d *Definition[T]) Bind(opts ...BindOption) *Binding[T] {
 		}
 		name := bindingFlagName(field.path, options.scope)
 		if isReservedFlagName(name) {
-			panic(fmt.Errorf("cfgm: generated CLI flag --%s is reserved by definition flags", name))
+			panic(fmt.Errorf("cfgm: generated CLI flag --%s is reserved by root flags", name))
 		}
 		field.aliases = append([]string(nil), options.aliases[field.path]...)
 		for _, flagName := range append([]string{name}, field.aliases...) {
@@ -300,7 +293,7 @@ func (d *Definition[T]) validateBindingOptions(options bindingOptions) {
 		}
 		for _, alias := range aliases {
 			if isReservedFlagName(alias) {
-				panic(fmt.Errorf("cfgm: alias --%s is reserved by definition flags", alias))
+				panic(fmt.Errorf("cfgm: alias --%s is reserved by root flags", alias))
 			}
 		}
 	}

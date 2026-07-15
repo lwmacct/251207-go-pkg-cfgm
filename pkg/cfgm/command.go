@@ -9,6 +9,14 @@ import (
 const configFlagName = "config"
 const envPrefixFlagName = "env-prefix"
 
+// RootFlags returns cfgm's conventional root command flags.
+func RootFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{Name: configFlagName, Aliases: []string{"c"}, Usage: "配置文件路径"},
+		&cli.StringFlag{Name: envPrefixFlagName, Aliases: []string{"e"}, Usage: "环境变量前缀"},
+	}
+}
+
 func commandConfigPath(cmd *cli.Command) string {
 	if cmd == nil {
 		return ""
