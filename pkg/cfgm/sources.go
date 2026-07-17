@@ -9,8 +9,6 @@ import (
 	"os"
 	"reflect"
 	"strings"
-
-	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
 )
 
 type fileSource struct {
@@ -52,7 +50,7 @@ func Required() FileOption {
 	}
 }
 
-// ExpandTemplates expands ${...} templates before parsing the file.
+// ExpandTemplates expands ${...} in string values after parsing the file.
 //
 // File template expansion is enabled by default; this option is mainly useful
 // after Raw when composing file options.
@@ -105,17 +103,14 @@ func (s *fileSource) Load(ctx context.Context, schema Schema) (map[string]any, e
 		if s.templates != nil {
 			expandTemplates = *s.templates
 		}
-		if expandTemplates {
-			expanded, expandErr := templexp.ExpandTemplate(string(content))
-			if expandErr != nil {
-				return nil, fmt.Errorf("expand template in %s: %w", path, expandErr)
-			}
-			content = []byte(expanded)
-		}
-
 		configMap, err := parseConfigBytes(path, content)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if expandTemplates {
+			if _, expandErr := expandTemplateValues(configMap, "root"); expandErr != nil {
+				return nil, fmt.Errorf("expand template in %s: %w", path, expandErr)
+			}
 		}
 
 		return configMap, nil

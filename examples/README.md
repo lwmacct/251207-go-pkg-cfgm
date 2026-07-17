@@ -99,7 +99,7 @@ go run ./examples/validation
 
 ## Templates
 
-配置文件使用 Redis URL/password 展示 `${VAR}` 和 `${VAR:-fallback}`：
+配置文件使用 Redis URL/password 展示只读的 `${VAR}` 和 `${VAR:-fallback}`。文件先完成 YAML 解析，再展开字符串值，因此变量不会改变配置结构：
 
 ```bash
 REDIS_URL=redis://localhost:6379/1 REDISCLI_AUTH=secret \

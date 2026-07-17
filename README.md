@@ -150,7 +150,21 @@ manager := cfgm.New(defaults, cfgm.WithCodec(cfgm.Codec[Endpoint]{
 
 ## 模板与文件
 
-默认值和内置 file source 默认展开 `${...}`。`WithoutTemplateExpansion()` 全局关闭；单个 file source 可用 `Raw()` 强制保留，或用 `ExpandTemplates()` 强制展开。
+默认值和内置 file source 的字符串值默认使用环境变量展开 `${...}`。语法采用 Docker Compose 的只读子集：
+
+| 语法 | 行为 |
+| --- | --- |
+| `${VAR}` | 使用变量值；未设置时为空字符串 |
+| `${VAR:-word}` / `${VAR-word}` | 未设置或为空 / 仅未设置时使用默认值 |
+| `${VAR:+word}` / `${VAR+word}` | 已设置且非空 / 已设置时使用替代值 |
+| `${VAR:?word}` / `${VAR?word}` | 未设置或为空 / 仅未设置时报错 |
+| `$$` | 字面量 `$` |
+
+`word` 支持嵌套展开。`${VAR=word}` 和 `${VAR:=word}` 等赋值语法不受支持，非法或未闭合表达式会返回错误。
+
+文件会先解析为 YAML/JSON，再只展开其中的字符串值；键名和配置结构不会被环境变量改变。数值、布尔值等非字符串字段应直接写入文件，或通过类型化环境变量 source/CLI 提供。
+
+`WithoutTemplateExpansion()` 全局关闭展开；单个 file source 可用 `Raw()` 强制保留，或用 `ExpandTemplates()` 强制展开。
 
 ```go
 manager := cfgm.New(defaults, cfgm.WithoutTemplateExpansion())

@@ -1,6 +1,7 @@
 package templexp_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
@@ -8,90 +9,140 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExpandTemplate_ShellParameterExpansion(t *testing.T) {
-	t.Setenv("SHELL_SET", "set-value")
-	t.Setenv("SHELL_EMPTY", "")
+func TestExpand(t *testing.T) {
+	variables := map[string]string{
+		"EMPTY":   "",
+		"SERVICE": "worker",
+		"SET":     "set-value",
+	}
+	lookup := func(name string) (string, bool) {
+		value, found := variables[name]
+
+		return value, found
+	}
 
 	tests := []struct {
 		name     string
 		template string
 		want     string
-		wantErr  bool
-		errMsg   string
 	}{
-		{
-			name:     "basic expansion",
-			template: `prefix-${SHELL_SET}-suffix`,
-			want:     "prefix-set-value-suffix",
-		},
-		{
-			name:     "missing expands to empty",
-			template: `x=${SHELL_MISSING}`,
-			want:     "x=",
-		},
-		{
-			name:     "fallback with colon treats empty as unset",
-			template: `${SHELL_EMPTY:-fallback}`,
-			want:     "fallback",
-		},
-		{
-			name:     "fallback without colon keeps empty",
-			template: `x=${SHELL_EMPTY-fallback}`,
-			want:     "x=",
-		},
-		{
-			name:     "alternate with colon",
-			template: `${SHELL_SET:+alt}`,
-			want:     "alt",
-		},
-		{
-			name:     "nested fallback",
-			template: `${SHELL_MISSING:-${SHELL_SET}}`,
-			want:     "set-value",
-		},
-		{
-			name:     "assignment updates template data",
-			template: `${SHELL_NEW:=value}-${SHELL_NEW}`,
-			want:     "value-value",
-		},
-		{
-			name:     "literal dollar",
-			template: `$$${SHELL_SET}`,
-			want:     "$set-value",
-		},
-		{
-			name:     "required var triggers error",
-			template: `${SHELL_MISSING:?missing}`,
-			wantErr:  true,
-			errMsg:   "missing",
-		},
+		{name: "value", template: `prefix-${SET}-suffix`, want: "prefix-set-value-suffix"},
+		{name: "unset value", template: `x=${MISSING}`, want: "x="},
+		{name: "default if unset", template: `${MISSING-default}`, want: "default"},
+		{name: "default if unset preserves empty", template: `x=${EMPTY-default}`, want: "x="},
+		{name: "default if empty", template: `${EMPTY:-default}`, want: "default"},
+		{name: "alternate if set", template: `${EMPTY+alternate}`, want: "alternate"},
+		{name: "alternate if unset", template: `${MISSING+alternate}`, want: ""},
+		{name: "alternate if non-empty", template: `${SET:+alternate}`, want: "alternate"},
+		{name: "alternate if empty", template: `${EMPTY:+alternate}`, want: ""},
+		{name: "nested default", template: `${MISSING:-${SET}}`, want: "set-value"},
+		{name: "lazy word", template: `${SET:-${MISSING:?not evaluated}}`, want: "set-value"},
+		{name: "literal dollar", template: `$$${SET}`, want: "$set-value"},
+		{name: "plain dollar", template: `$SET`, want: "$SET"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := templexp.ExpandTemplate(tt.template)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errMsg)
-
-				return
-			}
+			got, err := templexp.Expand(tt.template, lookup)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestExpandTemplate_JSONConfig(t *testing.T) {
-	t.Setenv("API_KEY", "sk-test-123")
-	t.Setenv("MODEL", "gpt-4")
+func TestExpandRequiredVariable(t *testing.T) {
+	variables := map[string]string{"EMPTY": "", "SERVICE": "worker"}
+	lookup := func(name string) (string, bool) {
+		value, found := variables[name]
 
-	jsonConfig := `{"name": "${AGENT_NAME:-test-agent}", "model": "${MODEL:-gpt-3.5-turbo}", "api_key": "${API_KEY}", "max_tokens": 2048}`
+		return value, found
+	}
 
-	expanded, err := templexp.ExpandTemplate(jsonConfig)
-	require.NoError(t, err, "templexp.ExpandTemplate() should succeed")
-	assert.NotEmpty(t, expanded, "templexp.ExpandTemplate() should return non-empty string")
-	assert.Contains(t, expanded, "test-agent", "AGENT_NAME should fall back")
-	assert.Contains(t, expanded, "gpt-4", "MODEL should be expanded to gpt-4")
-	assert.Contains(t, expanded, "sk-test-123", "API_KEY should be expanded")
+	t.Run("unset", func(t *testing.T) {
+		_, err := templexp.Expand(`${MISSING:?${SERVICE} requires MISSING}`, lookup)
+		require.Error(t, err)
+
+		var requiredErr *templexp.RequiredError
+		require.ErrorAs(t, err, &requiredErr)
+		assert.Equal(t, "MISSING", requiredErr.Name)
+		assert.Equal(t, "worker requires MISSING", requiredErr.Message)
+		assert.Equal(t, 0, requiredErr.Offset)
+	})
+
+	t.Run("empty with colon", func(t *testing.T) {
+		_, err := templexp.Expand(`${EMPTY:?must not be empty}`, lookup)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "must not be empty")
+	})
+
+	t.Run("empty without colon", func(t *testing.T) {
+		got, err := templexp.Expand(`${EMPTY?must be set}`, lookup)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("default message", func(t *testing.T) {
+		_, err := templexp.Expand(`${MISSING:?}`, lookup)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "required variable is unset or empty")
+	})
+
+	t.Run("default message without colon", func(t *testing.T) {
+		_, err := templexp.Expand(`${MISSING?}`, lookup)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "required variable is unset")
+	})
+}
+
+func TestExpandRejectsInvalidSyntax(t *testing.T) {
+	lookup := func(string) (string, bool) { return "", false }
+	tests := []struct {
+		name     string
+		template string
+		offset   int
+	}{
+		{name: "empty name", template: `${}`, offset: 2},
+		{name: "invalid name", template: `${1VAR}`, offset: 2},
+		{name: "unclosed", template: `a${VAR`, offset: 1},
+		{name: "assignment", template: `${VAR:=value}`, offset: 5},
+		{name: "assignment without colon", template: `${VAR=value}`, offset: 5},
+		{name: "unsupported operator", template: `${VAR:value}`, offset: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := templexp.Expand(tt.template, lookup)
+			require.Error(t, err)
+
+			var syntaxErr *templexp.SyntaxError
+			require.ErrorAs(t, err, &syntaxErr)
+			assert.Equal(t, tt.offset, syntaxErr.Offset)
+		})
+	}
+}
+
+func TestExpandRejectsNilLookup(t *testing.T) {
+	_, err := templexp.Expand(`${VAR}`, nil)
+	require.EqualError(t, err, "templexp: nil lookup function")
+}
+
+func TestExpandLimitsNestingDepth(t *testing.T) {
+	template := strings.Repeat(`${MISSING:-`, 101) + "value" + strings.Repeat("}", 101)
+	_, err := templexp.Expand(template, func(string) (string, bool) { return "", false })
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "maximum interpolation nesting depth exceeded")
+}
+
+func TestExpandCachesLookupResults(t *testing.T) {
+	calls := 0
+	lookup := func(string) (string, bool) {
+		calls++
+
+		return "value", true
+	}
+
+	got, err := templexp.Expand(`${VAR}-${VAR}`, lookup)
+	require.NoError(t, err)
+	assert.Equal(t, "value-value", got)
+	assert.Equal(t, 1, calls)
 }

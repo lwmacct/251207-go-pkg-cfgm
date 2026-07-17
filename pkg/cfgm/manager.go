@@ -1089,7 +1089,7 @@ func (l *configLoader[T]) load(ctx context.Context) (*T, *Report, error) {
 	}
 	configMap := structToMap(l.defaults)
 	if l.expandDefaults {
-		if _, err := expandTemplateValues(configMap); err != nil {
+		if _, err := expandTemplateValues(configMap, "defaults"); err != nil {
 			return nil, nil, fmt.Errorf("expand template in defaults: %w", err)
 		}
 	}

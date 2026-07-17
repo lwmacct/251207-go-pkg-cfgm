@@ -2,6 +2,9 @@ package cfgm
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"sort"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
 )
@@ -20,11 +23,16 @@ type Report struct {
 	Sources []SourceReport
 }
 
-func expandTemplateValues(value any) (any, error) {
+func expandTemplateValues(value any, path string) (any, error) {
 	switch typed := value.(type) {
 	case map[string]any:
-		for key, item := range typed {
-			expanded, err := expandTemplateValues(item)
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			expanded, err := expandTemplateValues(typed[key], templateMapPath(path, key))
 			if err != nil {
 				return nil, err
 			}
@@ -33,7 +41,7 @@ func expandTemplateValues(value any) (any, error) {
 		return typed, nil
 	case []any:
 		for index, item := range typed {
-			expanded, err := expandTemplateValues(item)
+			expanded, err := expandTemplateValues(item, fmt.Sprintf("%s[%d]", path, index))
 			if err != nil {
 				return nil, err
 			}
@@ -44,9 +52,9 @@ func expandTemplateValues(value any) (any, error) {
 		if !containsTemplateMarker(typed) {
 			return typed, nil
 		}
-		expanded, err := templexp.ExpandTemplate(typed)
+		expanded, err := templexp.Expand(typed, os.LookupEnv)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("expand template at %s: %w", path, err)
 		}
 		return expanded, nil
 	default:
@@ -54,9 +62,17 @@ func expandTemplateValues(value any) (any, error) {
 	}
 }
 
+func templateMapPath(parent, key string) string {
+	if parent == "" {
+		return key
+	}
+
+	return parent + "." + key
+}
+
 func containsTemplateMarker(value string) bool {
 	for index := range len(value) - 1 {
-		if value[index] == '$' && value[index+1] == '{' {
+		if value[index] == '$' && (value[index+1] == '{' || value[index+1] == '$') {
 			return true
 		}
 	}

@@ -195,20 +195,52 @@ func TestManagerTemplateExpansion(t *testing.T) {
 	type Config struct {
 		Name     string `json:"name"`
 		Fallback string `json:"fallback"`
+		Price    string `json:"price"`
 	}
 	t.Setenv("CFG_NAME", "from-template")
 	t.Setenv("CFG_DEFAULT", "from-default-template")
-	path := writeTempConfig(t, `name: "${CFG_NAME}"`)
+	path := writeTempConfig(t, "name: ${CFG_NAME}\nprice: $$10\n")
 
 	cfg, err := New(Config{Fallback: "${CFG_DEFAULT}"}, WithoutDefaultPaths()).Load(t.Context(), File(path))
 	require.NoError(t, err)
 	assert.Equal(t, "from-template", cfg.Name)
 	assert.Equal(t, "from-default-template", cfg.Fallback)
+	assert.Equal(t, "$10", cfg.Price)
 
 	cfg, err = New(Config{Fallback: "${CFG_DEFAULT}"}, WithoutDefaultPaths(), WithoutTemplateExpansion()).Load(t.Context(), File(path))
 	require.NoError(t, err)
 	assert.Equal(t, "${CFG_NAME}", cfg.Name)
 	assert.Equal(t, "${CFG_DEFAULT}", cfg.Fallback)
+	assert.Equal(t, "$$10", cfg.Price)
+}
+
+func TestManagerTemplateExpansionPreservesParsedStructure(t *testing.T) {
+	type Config struct {
+		Injected bool   `json:"injected"`
+		Name     string `json:"name"`
+	}
+	t.Setenv("CFG_NAME", "safe\ninjected: true")
+	path := writeTempConfig(t, "name: ${CFG_NAME}\n")
+
+	cfg, err := New(Config{}, WithoutDefaultPaths()).Load(t.Context(), File(path))
+	require.NoError(t, err)
+	assert.Equal(t, "safe\ninjected: true", cfg.Name)
+	assert.False(t, cfg.Injected)
+}
+
+func TestManagerTemplateExpansionReportsValuePath(t *testing.T) {
+	type Redis struct {
+		Password string `json:"password"`
+	}
+	type Config struct {
+		Redis Redis `json:"redis"`
+	}
+	path := writeTempConfig(t, "redis:\n  password: ${REDISCLI_AUTH:?Redis password is required}\n")
+
+	_, err := New(Config{}, WithoutDefaultPaths()).Load(t.Context(), File(path))
+	require.Error(t, err)
+	require.ErrorContains(t, err, "root.redis.password")
+	assert.ErrorContains(t, err, "Redis password is required")
 }
 
 func TestManagerRejectsNilContext(t *testing.T) {
