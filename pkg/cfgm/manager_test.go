@@ -158,6 +158,16 @@ server:
 	assert.Equal(t, "redis://env:6379", loaded.Server.Redis.URL)
 }
 
+func TestManagerCLIOverridesRequiredDefaultTemplate(t *testing.T) {
+	defaults := bindingDefaults()
+	defaults.Server.Addr = `${SERVER_ADDR:?SERVER_ADDR is required}`
+	manager := New(defaults, WithoutDefaultPaths())
+
+	loaded, err := runManager(t, manager, "--addr=:8200")
+	require.NoError(t, err)
+	assert.Equal(t, ":8200", loaded.Server.Addr)
+}
+
 func TestManagerLoadsRepeatedStructValues(t *testing.T) {
 	manager := New(bindingDefaults())
 	loaded, err := runManager(t, manager,

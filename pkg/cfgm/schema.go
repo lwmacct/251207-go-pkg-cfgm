@@ -3,9 +3,9 @@ package cfgm
 import "reflect"
 
 type Schema struct {
-	model           *schemaModel
-	codecs          map[reflect.Type]valueCodec
-	expandTemplates bool
+	model  *schemaModel
+	codecs map[reflect.Type]valueCodec
+	lookup func(string) (string, bool)
 }
 
 type Field struct {

@@ -18,6 +18,23 @@ func writeTempConfig(t *testing.T, content string) string {
 	return path
 }
 
+type environmentMutationSource map[string]string
+
+func (environmentMutationSource) Name() string { return "environment-mutation" }
+
+func (s environmentMutationSource) Load(ctx context.Context, _ Schema) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for name, value := range s {
+		if err := os.Setenv(name, value); err != nil {
+			return nil, err
+		}
+	}
+
+	return map[string]any{}, nil
+}
+
 func TestManagerLoadsExplicitSourcesInOrder(t *testing.T) {
 	type Config struct {
 		Name  string `json:"name"`
@@ -212,6 +229,64 @@ func TestManagerTemplateExpansion(t *testing.T) {
 	assert.Equal(t, "${CFG_NAME}", cfg.Name)
 	assert.Equal(t, "${CFG_DEFAULT}", cfg.Fallback)
 	assert.Equal(t, "$$10", cfg.Price)
+}
+
+func TestManagerExpandsOnlyEffectiveTemplateValues(t *testing.T) {
+	type Config struct {
+		TokenSecret string `json:"token-secret"`
+	}
+	manager := New(Config{
+		TokenSecret: `${DIRECTIVE_TOKEN_SECRET:?DIRECTIVE_TOKEN_SECRET is required}`,
+	}, WithoutDefaultPaths())
+
+	t.Run("file overrides default template", func(t *testing.T) {
+		path := writeTempConfig(t, "token-secret: from-file\n")
+		cfg, err := manager.Load(t.Context(), File(path))
+		require.NoError(t, err)
+		assert.Equal(t, "from-file", cfg.TokenSecret)
+	})
+
+	t.Run("env source overrides file template", func(t *testing.T) {
+		path := writeTempConfig(t, "token-secret: ${FILE_TOKEN_SECRET:?FILE_TOKEN_SECRET is required}\n")
+		t.Setenv("APP_TOKEN_SECRET", "from-env-source")
+		cfg, err := manager.Load(t.Context(), File(path), Env("APP_"))
+		require.NoError(t, err)
+		assert.Equal(t, "from-env-source", cfg.TokenSecret)
+	})
+
+	t.Run("effective template still fails", func(t *testing.T) {
+		_, err := manager.Load(t.Context())
+		require.Error(t, err)
+		require.ErrorContains(t, err, "root.token-secret")
+		assert.ErrorContains(t, err, "DIRECTIVE_TOKEN_SECRET is required")
+	})
+}
+
+func TestManagerEscapesLiteralTemplate(t *testing.T) {
+	type Config struct {
+		Value string `json:"value"`
+	}
+	cfg, err := New(Config{Value: `$${LITERAL}`}, WithoutDefaultPaths()).Load(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, `${LITERAL}`, cfg.Value)
+}
+
+func TestManagerUsesOneEnvironmentSnapshotPerLoad(t *testing.T) {
+	type Config struct {
+		FromEnv      string `json:"from-env"`
+		Interpolated string `json:"interpolated"`
+	}
+	t.Setenv("APP_FROM_ENV", "before")
+	t.Setenv("TEMPLATE_VALUE", "before")
+	manager := New(Config{Interpolated: `${TEMPLATE_VALUE}`}, WithoutDefaultPaths())
+
+	cfg, err := manager.Load(t.Context(), environmentMutationSource{
+		"APP_FROM_ENV":   "after",
+		"TEMPLATE_VALUE": "after",
+	}, Env("APP_"))
+	require.NoError(t, err)
+	assert.Equal(t, "before", cfg.FromEnv)
+	assert.Equal(t, "before", cfg.Interpolated)
 }
 
 func TestManagerTemplateExpansionPreservesParsedStructure(t *testing.T) {

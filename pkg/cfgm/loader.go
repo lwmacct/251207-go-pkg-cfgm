@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/lwmacct/251207-go-pkg-cfgm/pkg/templexp"
 )
@@ -23,7 +24,7 @@ type Report struct {
 	Sources []SourceReport
 }
 
-func expandTemplateValues(value any, path string) (any, error) {
+func expandTemplateValues(value any, path string, lookup templexp.LookupFunc) (any, error) {
 	switch typed := value.(type) {
 	case map[string]any:
 		keys := make([]string, 0, len(typed))
@@ -32,7 +33,7 @@ func expandTemplateValues(value any, path string) (any, error) {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			expanded, err := expandTemplateValues(typed[key], templateMapPath(path, key))
+			expanded, err := expandTemplateValues(typed[key], templateMapPath(path, key), lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -41,7 +42,7 @@ func expandTemplateValues(value any, path string) (any, error) {
 		return typed, nil
 	case []any:
 		for index, item := range typed {
-			expanded, err := expandTemplateValues(item, fmt.Sprintf("%s[%d]", path, index))
+			expanded, err := expandTemplateValues(item, fmt.Sprintf("%s[%d]", path, index), lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -52,13 +53,29 @@ func expandTemplateValues(value any, path string) (any, error) {
 		if !containsTemplateMarker(typed) {
 			return typed, nil
 		}
-		expanded, err := templexp.Expand(typed, os.LookupEnv)
+		expanded, err := templexp.Expand(typed, lookup)
 		if err != nil {
 			return nil, fmt.Errorf("expand template at %s: %w", path, err)
 		}
 		return expanded, nil
 	default:
 		return value, nil
+	}
+}
+
+func environmentSnapshot() templexp.LookupFunc {
+	values := make(map[string]string)
+	for _, entry := range os.Environ() {
+		name, value, found := strings.Cut(entry, "=")
+		if found {
+			values[name] = value
+		}
+	}
+
+	return func(name string) (string, bool) {
+		value, found := values[name]
+
+		return value, found
 	}
 }
 

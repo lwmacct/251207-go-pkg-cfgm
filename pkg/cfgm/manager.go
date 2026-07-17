@@ -211,7 +211,7 @@ func (m *Manager[T]) loader() *configLoader[T] {
 		defaults:          m.defaults,
 		schema:            m.schema,
 		logger:            m.logger,
-		expandDefaults:    m.expandTemplates,
+		expandTemplates:   m.expandTemplates,
 		strictUnknownKeys: m.strictUnknownKeys,
 		codecs:            m.codecs,
 	}
@@ -1078,7 +1078,7 @@ type configLoader[T any] struct {
 	schema            *schemaModel
 	sources           []Source
 	logger            *slog.Logger
-	expandDefaults    bool
+	expandTemplates   bool
 	strictUnknownKeys bool
 	codecs            map[reflect.Type]valueCodec
 }
@@ -1088,11 +1088,7 @@ func (l *configLoader[T]) load(ctx context.Context) (*T, *Report, error) {
 		return nil, nil, errors.New("cfgm: nil context")
 	}
 	configMap := structToMap(l.defaults)
-	if l.expandDefaults {
-		if _, err := expandTemplateValues(configMap, "defaults"); err != nil {
-			return nil, nil, fmt.Errorf("expand template in defaults: %w", err)
-		}
-	}
+	lookup := environmentSnapshot()
 	report := &Report{}
 	for _, source := range l.sources {
 		if err := ctx.Err(); err != nil {
@@ -1101,7 +1097,7 @@ func (l *configLoader[T]) load(ctx context.Context) (*T, *Report, error) {
 		if source == nil {
 			continue
 		}
-		data, err := source.Load(ctx, Schema{model: l.schema, codecs: l.codecs, expandTemplates: l.expandDefaults})
+		data, err := source.Load(ctx, Schema{model: l.schema, codecs: l.codecs, lookup: lookup})
 		if err != nil {
 			return nil, report, fmt.Errorf("%s: %w", source.Name(), err)
 		}
@@ -1113,6 +1109,11 @@ func (l *configLoader[T]) load(ctx context.Context) (*T, *Report, error) {
 		mergeMaps(configMap, data)
 		report.Sources = append(report.Sources, SourceReport{Name: source.Name(), Keys: keys})
 		l.logger.DebugContext(ctx, "Loaded config source", "source", source.Name(), "keys", keys)
+	}
+	if l.expandTemplates {
+		if _, err := expandTemplateValues(configMap, "root", lookup); err != nil {
+			return nil, report, fmt.Errorf("expand template in effective config: %w", err)
+		}
 	}
 	var config T
 	if err := decodeConfigMapWithCodecs(configMap, &config, l.codecs); err != nil {

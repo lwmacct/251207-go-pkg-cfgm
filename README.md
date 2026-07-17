@@ -164,13 +164,13 @@ manager := cfgm.New(defaults, cfgm.WithCodec(cfgm.Codec[Endpoint]{
 
 文件会先解析为 YAML/JSON，再只展开其中的字符串值；键名和配置结构不会被环境变量改变。数值、布尔值等非字符串字段应直接写入文件，或通过类型化环境变量 source/CLI 提供。
 
-`WithoutTemplateExpansion()` 全局关闭展开；单个 file source 可用 `Raw()` 强制保留，或用 `ExpandTemplates()` 强制展开。
+所有来源先按优先级合并，再统一展开最终生效的字符串值。被高优先级来源覆盖的模板不会求值；一次加载中的插值和 `Env(...)` 使用同一份环境快照。
+
+需要保留字面量 `${VAR}` 时写成 `$${VAR}`。`WithoutTemplateExpansion()` 可全局关闭展开。
 
 ```go
 manager := cfgm.New(defaults, cfgm.WithoutTemplateExpansion())
-config, err := manager.Load(ctx,
-    cfgm.File("config.yaml", cfgm.ExpandTemplates()),
-)
+config, err := manager.Load(ctx, cfgm.File("config.yaml"))
 ```
 
 ## 示例配置

@@ -12,9 +12,8 @@ import (
 )
 
 type fileSource struct {
-	paths     []string
-	optional  bool
-	templates *bool
+	paths    []string
+	optional bool
 }
 
 func File(path string, opts ...FileOption) Source {
@@ -50,25 +49,6 @@ func Required() FileOption {
 	}
 }
 
-// ExpandTemplates expands ${...} in string values after parsing the file.
-//
-// File template expansion is enabled by default; this option is mainly useful
-// after Raw when composing file options.
-func ExpandTemplates() FileOption {
-	return func(s *fileSource) {
-		enabled := true
-		s.templates = &enabled
-	}
-}
-
-// Raw disables ${...} template expansion for this file source.
-func Raw() FileOption {
-	return func(s *fileSource) {
-		enabled := false
-		s.templates = &enabled
-	}
-}
-
 func (s *fileSource) Name() string {
 	if len(s.paths) == 1 {
 		return "file:" + s.paths[0]
@@ -99,18 +79,9 @@ func (s *fileSource) Load(ctx context.Context, schema Schema) (map[string]any, e
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
 
-		expandTemplates := schema.expandTemplates
-		if s.templates != nil {
-			expandTemplates = *s.templates
-		}
 		configMap, err := parseConfigBytes(path, content)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
-		if expandTemplates {
-			if _, expandErr := expandTemplateValues(configMap, "root"); expandErr != nil {
-				return nil, fmt.Errorf("expand template in %s: %w", path, expandErr)
-			}
 		}
 
 		return configMap, nil
@@ -148,7 +119,11 @@ func (s *envSource) Load(ctx context.Context, schema Schema) (map[string]any, er
 		}
 
 		envKey := s.prefix + envName(field.Path)
-		value, exists := os.LookupEnv(envKey)
+		lookup := schema.lookup
+		if lookup == nil {
+			lookup = os.LookupEnv
+		}
+		value, exists := lookup(envKey)
 		if !exists {
 			continue
 		}

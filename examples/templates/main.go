@@ -18,29 +18,16 @@ type config struct {
 func main() {
 	ctx := context.Background()
 	manager := cfgm.New(config{}, cfgm.WithoutDefaultPaths())
-	expanded, err := manager.Load(ctx, cfgm.File("examples/templates/config.yaml"))
-	if err != nil {
-		exit(err)
-	}
-	raw, err := manager.Load(ctx, cfgm.File("examples/templates/config.yaml", cfgm.Raw()))
-	if err != nil {
-		exit(err)
-	}
-	globallyRaw := cfgm.New(config{}, cfgm.WithoutDefaultPaths(), cfgm.WithoutTemplateExpansion())
-	forced, err := globallyRaw.Load(ctx, cfgm.File("examples/templates/config.yaml", cfgm.ExpandTemplates()))
+	loaded, err := manager.Load(ctx, cfgm.File("examples/templates/config.yaml"))
 	if err != nil {
 		exit(err)
 	}
 
 	_, _ = fmt.Fprintf(
 		os.Stdout,
-		"expanded: url=%s password_set=%t\nraw: url=%s password=%s\nforced: url=%s password_set=%t\n",
-		expanded.Redis.URL,
-		expanded.Redis.Password != "",
-		raw.Redis.URL,
-		raw.Redis.Password,
-		forced.Redis.URL,
-		forced.Redis.Password != "",
+		"url=%s password_set=%t\n",
+		loaded.Redis.URL,
+		loaded.Redis.Password != "",
 	)
 }
 

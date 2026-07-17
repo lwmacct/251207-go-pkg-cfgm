@@ -10,7 +10,7 @@
 | [`composite`](composite) | 标量 slice、`[]struct`、JSON object flags 和显式清空 |
 | [`codec`](codec) | 文件、环境变量和 CLI 共用自定义 codec |
 | [`validation`](validation) | 严格未知字段校验、`AllowUnknownKeys` 和已知字段类型校验 |
-| [`templates`](templates) | `${...}`、`Raw`、`ExpandTemplates` 和全局模板策略 |
+| [`templates`](templates) | `${...}`、最终值插值和全局模板策略 |
 | [`config-files`](config-files) | 生成 example YAML 并用同一 `Manager` 校验运行配置 |
 | [`custom-source`](custom-source) | 实现自定义 `Source` 并读取 `Schema` |
 
@@ -106,7 +106,7 @@ REDIS_URL=redis://localhost:6379/1 REDISCLI_AUTH=secret \
   go run ./examples/templates
 ```
 
-程序同时加载三次配置，分别展示默认展开、`Raw()` 保留原文，以及 `WithoutTemplateExpansion()` 配合 `ExpandTemplates()` 的局部强制展开。
+所有来源合并后只展开最终生效的字符串值；需要保留字面量 `${VAR}` 时使用 `$${VAR}`，也可用 `WithoutTemplateExpansion()` 全局关闭展开。
 
 ## Config Files
 
